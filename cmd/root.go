@@ -8,14 +8,10 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/matutedenda/rabbitpeek/internal/config"
-	"github.com/matutedenda/rabbitpeek/internal/rabbit"
 	"github.com/matutedenda/rabbitpeek/internal/ui"
 )
 
-var (
-	profileFlag string
-	configPath  string
-)
+var configPath string
 
 var rootCmd = &cobra.Command{
 	Use:   "rabbitpeek",
@@ -27,26 +23,7 @@ var rootCmd = &cobra.Command{
 			os.Exit(1)
 		}
 
-		profileName := profileFlag
-		if profileName == "" {
-			profileName = cfg.DefaultProfile
-		}
-		if profileName == "" {
-			profileName = "local"
-		}
-
-		profile, err := cfg.GetProfile(profileName)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-			os.Exit(1)
-		}
-
-		client, err := rabbit.NewClient(profile)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error creating client: %v\n", err)
-			os.Exit(1)
-		}
-		model := ui.NewApp(client, profileName, cfg)
+		model := ui.NewApp(cfg, configPath)
 
 		p := tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseCellMotion())
 		if _, err := p.Run(); err != nil {
@@ -64,6 +41,5 @@ func Execute() {
 }
 
 func init() {
-	rootCmd.Flags().StringVarP(&profileFlag, "profile", "p", "", "Connection profile to use")
 	rootCmd.Flags().StringVarP(&configPath, "config", "c", "", "Path to config file")
 }

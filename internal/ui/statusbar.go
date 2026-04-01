@@ -52,14 +52,19 @@ func (s *StatusBar) DecreaseFetchCount() {
 }
 
 func (s StatusBar) View() string {
-	left := fmt.Sprintf(" Profile: %s | Fetch: %d | ←/→ scroll | +/- fetch count | ? help",
+	if s.width == 0 {
+		return ""
+	}
+
+	left := fmt.Sprintf(" Profile: %s | Fetch: %d | +/- fetch count | ? help",
 		s.profile, s.fetchCount)
 
 	if s.message != "" {
+		line := fmt.Sprintf("%s | %s", left, s.message)
 		if s.isError {
-			return StyleStatusBarError.Width(s.width).Render(fmt.Sprintf("%s │ %s", left, s.message))
+			return StyleStatusBarError.Width(s.width).Render(line)
 		}
-		return StyleStatusBar.Width(s.width).Render(fmt.Sprintf("%s │ %s", left, s.message))
+		return StyleStatusBar.Width(s.width).Render(line)
 	}
 
 	return StyleStatusBar.Width(s.width).Render(left)

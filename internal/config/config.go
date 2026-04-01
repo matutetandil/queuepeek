@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/spf13/viper"
 )
@@ -78,6 +79,63 @@ func (c *Config) ProfileNames() []string {
 	return names
 }
 
+// Save writes the current config to the config file path.
+// If no config file was previously loaded, it creates ~/.config/rabbitpeek/config.toml.
+func (c *Config) Save(path string) error {
+	if path == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return fmt.Errorf("getting home dir: %w", err)
+		}
+		dir := filepath.Join(home, ".config", "rabbitpeek")
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return fmt.Errorf("creating config dir: %w", err)
+		}
+		path = filepath.Join(dir, "config.toml")
+	}
+
+	var b strings.Builder
+	if c.DefaultProfile != "" {
+		fmt.Fprintf(&b, "default_profile = %q\n\n", c.DefaultProfile)
+	}
+	for name, p := range c.Profiles {
+		fmt.Fprintf(&b, "[profiles.%q]\n", name)
+		fmt.Fprintf(&b, "host = %q\n", p.Host)
+		fmt.Fprintf(&b, "port = %d\n", p.Port)
+		fmt.Fprintf(&b, "username = %q\n", p.Username)
+		fmt.Fprintf(&b, "password = %q\n", p.Password)
+		fmt.Fprintf(&b, "vhost = %q\n", p.Vhost)
+		fmt.Fprintf(&b, "tls = %t\n", p.TLS)
+		if p.TLSCert != "" {
+			fmt.Fprintf(&b, "tls_cert = %q\n", p.TLSCert)
+		}
+		if p.TLSKey != "" {
+			fmt.Fprintf(&b, "tls_key = %q\n", p.TLSKey)
+		}
+		if p.TLSCA != "" {
+			fmt.Fprintf(&b, "tls_ca = %q\n", p.TLSCA)
+		}
+		b.WriteString("\n")
+	}
+
+	return os.WriteFile(path, []byte(b.String()), 0o644)
+}
+
+// AddProfile adds a profile and saves the config.
+func (c *Config) AddProfile(name string, p Profile, configPath string) error {
+	c.Profiles[name] = p
+	return c.Save(configPath)
+}
+
+// DeleteProfile removes a profile and saves the config.
+func (c *Config) DeleteProfile(name string, configPath string) error {
+	delete(c.Profiles, name)
+	if c.DefaultProfile == name {
+		c.DefaultProfile = ""
+	}
+	return c.Save(configPath)
+}
+
 // Load reads config from the given path, or the default ~/.config/rabbitpeek/config.toml
 func Load(path string) (*Config, error) {
 	v := viper.New()
@@ -101,15 +159,7 @@ func Load(path string) (*Config, error) {
 
 	if err := v.ReadInConfig(); err != nil {
 		if _, ok := err.(viper.ConfigFileNotFoundError); ok {
-			// Return default config with a local profile
-			cfg.DefaultProfile = "local"
-			cfg.Profiles["local"] = Profile{
-				Host:     "localhost",
-				Port:     15672,
-				Username: "guest",
-				Password: "guest",
-				Vhost:    "/",
-			}
+			// Return empty config — user will add profiles via the TUI
 			return cfg, nil
 		}
 		return nil, fmt.Errorf("reading config: %w", err)

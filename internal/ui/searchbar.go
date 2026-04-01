@@ -6,10 +6,10 @@ import (
 )
 
 type SearchBar struct {
-	input   textinput.Model
-	active  bool
-	width   int
-	errMsg  string
+	input  textinput.Model
+	active bool
+	width  int
+	errMsg string
 }
 
 func NewSearchBar() SearchBar {
@@ -28,7 +28,11 @@ func NewSearchBar() SearchBar {
 
 func (s *SearchBar) SetWidth(width int) {
 	s.width = width
-	s.input.Width = width - 6
+	w := width - 6
+	if w < 1 {
+		w = 1
+	}
+	s.input.Width = w
 }
 
 func (s *SearchBar) Focus() {
@@ -63,9 +67,11 @@ func (s *SearchBar) Input() *textinput.Model {
 }
 
 func (s SearchBar) View() string {
-	inputView := s.input.View()
+	if s.width == 0 {
+		return ""
+	}
 
-	content := StyleSearchBar.Width(s.width).Render(inputView)
+	content := StyleSearchBar.Width(s.width).Render(s.input.View())
 
 	if s.errMsg != "" {
 		content += "\n" + StyleSearchError.Render("  "+s.errMsg)

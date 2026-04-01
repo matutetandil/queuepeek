@@ -4,18 +4,19 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/charmbracelet/lipgloss"
 	"github.com/matutedenda/rabbitpeek/internal/rabbit"
 )
 
 type Sidebar struct {
-	queues   []rabbit.Queue
-	cursor   int
-	offset   int
-	height   int
-	width    int
-	focused  bool
-	vhost    string
-	profile  string
+	queues  []rabbit.Queue
+	cursor  int
+	offset  int
+	height  int
+	width   int
+	focused bool
+	vhost   string
+	profile string
 }
 
 func NewSidebar(profile, vhost string) Sidebar {
@@ -36,6 +37,11 @@ func (s *Sidebar) SetQueues(queues []rabbit.Queue) {
 func (s *Sidebar) SetSize(width, height int) {
 	s.width = width
 	s.height = height
+	// Clamp scroll offset after resize
+	vis := s.visibleItems()
+	if s.offset > 0 && s.offset+vis > len(s.queues) {
+		s.offset = max(0, len(s.queues)-vis)
+	}
 }
 
 func (s *Sidebar) SetFocused(focused bool) {
@@ -54,9 +60,9 @@ func (s *Sidebar) MoveUp() {
 func (s *Sidebar) MoveDown() {
 	if s.cursor < len(s.queues)-1 {
 		s.cursor++
-		visibleHeight := s.visibleItems()
-		if s.cursor >= s.offset+visibleHeight {
-			s.offset = s.cursor - visibleHeight + 1
+		vis := s.visibleItems()
+		if s.cursor >= s.offset+vis {
+			s.offset = s.cursor - vis + 1
 		}
 	}
 }
@@ -69,8 +75,8 @@ func (s *Sidebar) SelectedQueue() *rabbit.Queue {
 }
 
 func (s *Sidebar) visibleItems() int {
-	// Account for header (3 lines: header + vhost + blank line)
-	available := s.height - 4
+	// header (1) + vhost (1) + blank (1) = 3 lines of chrome
+	available := s.height - 3
 	if available < 1 {
 		return 1
 	}
@@ -78,20 +84,32 @@ func (s *Sidebar) visibleItems() int {
 }
 
 func (s Sidebar) View() string {
+	if s.width == 0 || s.height == 0 {
+		return ""
+	}
+
 	var b strings.Builder
 
+	innerW := s.width - 2 // 1 padding each side
+	if innerW < 1 {
+		innerW = 1
+	}
+
 	// Header
-	header := StyleSidebarHeader.Width(s.width - 2).Render(fmt.Sprintf("🐇 %s", s.profile))
-	b.WriteString(header)
+	b.WriteString(StyleSidebarHeader.Width(innerW).Render(fmt.Sprintf(" %s", s.profile)))
 	b.WriteString("\n")
 
-	vhostLine := StyleQueueItem.Foreground(ColorMuted).Render(fmt.Sprintf("vhost: %s", s.vhost))
-	b.WriteString(vhostLine)
+	b.WriteString(lipgloss.NewStyle().Foreground(ColorMuted).Render(fmt.Sprintf(" vhost: %s", s.vhost)))
 	b.WriteString("\n\n")
 
 	if len(s.queues) == 0 {
-		b.WriteString(StyleQueueItem.Foreground(ColorMuted).Render("  No queues found"))
-		return StyleSidebar.Width(s.width).Height(s.height).Render(b.String())
+		b.WriteString(lipgloss.NewStyle().Foreground(ColorMuted).Render(" No queues found"))
+
+		style := lipgloss.NewStyle().
+			Background(ColorSidebarBg).
+			Width(s.width).
+			Height(s.height)
+		return style.Render(b.String())
 	}
 
 	visible := s.visibleItems()
@@ -103,19 +121,15 @@ func (s Sidebar) View() string {
 	for i := s.offset; i < end; i++ {
 		q := s.queues[i]
 		countStr := formatCount(q.Messages)
-		name := truncateStr(q.Name, s.width-8)
-
+		name := truncateStr(q.Name, innerW-8)
 		line := fmt.Sprintf("%s %s", name, countStr)
 
 		if i == s.cursor && s.focused {
-			b.WriteString(StyleQueueItemSelected.Width(s.width - 2).Render(line))
+			b.WriteString(StyleQueueItemSelected.Width(innerW).Render(line))
 		} else if i == s.cursor {
-			b.WriteString(StyleQueueItem.
-				Foreground(ColorWhite).
-				Width(s.width - 2).
-				Render(line))
+			b.WriteString(StyleQueueItem.Foreground(ColorWhite).Width(innerW).Render(line))
 		} else {
-			b.WriteString(StyleQueueItem.Width(s.width - 2).Render(line))
+			b.WriteString(StyleQueueItem.Width(innerW).Render(line))
 		}
 
 		if i < end-1 {
@@ -123,7 +137,13 @@ func (s Sidebar) View() string {
 		}
 	}
 
-	return StyleSidebar.Width(s.width).Height(s.height).Render(b.String())
+	style := lipgloss.NewStyle().
+		Background(ColorSidebarBg).
+		Width(s.width).
+		Height(s.height).
+		Padding(0, 1)
+
+	return style.Render(b.String())
 }
 
 func formatCount(count int) string {

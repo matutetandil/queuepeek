@@ -2,6 +2,7 @@ package ui
 
 import "github.com/charmbracelet/lipgloss"
 
+// Color palette — Slack dark theme inspired
 var (
 	ColorBg        = lipgloss.Color("#1A1D21")
 	ColorSidebarBg = lipgloss.Color("#19171D")
@@ -12,17 +13,15 @@ var (
 	ColorError     = lipgloss.Color("#E01E5A")
 	ColorSuccess   = lipgloss.Color("#2BAC76")
 	ColorWhite     = lipgloss.Color("#FFFFFF")
+	ColorDivider   = lipgloss.Color("#3D3F45")
+)
 
-	StyleSidebar = lipgloss.NewStyle().
-			Background(ColorSidebarBg).
-			Padding(1, 1)
-
+// Base styles — no hardcoded Width/Height; dimensions applied at render time.
+var (
 	StyleSidebarHeader = lipgloss.NewStyle().
 				Foreground(ColorWhite).
 				Bold(true).
-				Background(ColorSidebarBg).
-				Padding(0, 1).
-				MarginBottom(1)
+				Background(ColorSidebarBg)
 
 	StyleQueueItem = lipgloss.NewStyle().
 			Foreground(ColorPrimary).
@@ -46,19 +45,12 @@ var (
 	StyleQueueCountZero = lipgloss.NewStyle().
 				Foreground(ColorSuccess)
 
-	StyleMainPanel = lipgloss.NewStyle().
-			Background(ColorBg).
-			Padding(1, 2)
-
 	StyleMessageHeader = lipgloss.NewStyle().
 				Foreground(ColorWhite).
-				Bold(true).
-				Padding(0, 0).
-				MarginBottom(1)
+				Bold(true)
 
 	StyleMessageMeta = lipgloss.NewStyle().
-			Foreground(ColorMuted).
-			MarginBottom(0)
+			Foreground(ColorMuted)
 
 	StyleMessageBody = lipgloss.NewStyle().
 			Foreground(ColorPrimary)
@@ -125,8 +117,9 @@ var (
 
 	StyleSpinner = lipgloss.NewStyle().
 			Foreground(ColorAccent)
+)
 
-	StyleBorder = lipgloss.NewStyle().
-			Border(lipgloss.NormalBorder(), false, true, false, false).
-			BorderForeground(lipgloss.Color("#2C2D31"))
+const (
+	MinTermWidth  = 80
+	MinTermHeight = 24
 )
