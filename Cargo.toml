@@ -1,0 +1,16 @@
+[package]
+name = "rabbitpeek"
+version = "0.1.0"
+edition = "2021"
+description = "A TUI RabbitMQ queue inspector"
+
+[dependencies]
+ratatui = "0.29"
+crossterm = "0.28"
+reqwest = { version = "0.12", features = ["blocking", "json", "native-tls"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+dirs = "6"
+tui-input = "0.11"
+urlencoding = "2"
