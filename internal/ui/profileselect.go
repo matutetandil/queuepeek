@@ -11,6 +11,17 @@ import (
 	"github.com/matutedenda/rabbitpeek/internal/config"
 )
 
+const asciiLogo = `
+        (\(\
+        ( -.-)
+        o_(")(")
+
+ _ __ __ _ | |__  | |__  (_)| |_  _ __    ___   ___  | | __
+| '__|/ _` + "`" + ` || '_ \ | '_ \ | || __|| '_ \  / _ \ / _ \ | |/ /
+| |  | (_| || |_) || |_) || || |_ | |_) ||  __/|  __/ |   <
+|_|   \__,_||_.__/ |_.__/ |_| \__|| .__/  \___| \___| |_|\_\
+                                  |_|`
+
 type profileSelectMode int
 
 const (
@@ -18,6 +29,7 @@ const (
 	modeAddProfile
 	modeEditProfile
 	modeConfirmDelete
+	modeThemePicker
 )
 
 type profileChosenMsg struct {
@@ -50,6 +62,9 @@ type ProfileSelect struct {
 	formErr     string
 	tlsEnabled  bool
 	editingName string // original name when editing
+
+	// Theme picker
+	themeCursor int
 }
 
 const (
@@ -99,6 +114,11 @@ func newFormInputs() []textinput.Model {
 }
 
 func NewProfileSelect(cfg *config.Config, configPath string) ProfileSelect {
+	// Apply saved theme
+	if cfg.Theme != "" {
+		ApplyTheme(cfg.Theme)
+	}
+
 	return ProfileSelect{
 		config:     cfg,
 		configPath: configPath,
@@ -110,7 +130,7 @@ func NewProfileSelect(cfg *config.Config, configPath string) ProfileSelect {
 			"15672 = local default, 443 = cloud/TLS (e.g. CloudAMQP)",
 			"RabbitMQ management user",
 			"RabbitMQ management password",
-			"Virtual host (default: /)",
+			"Initial virtual host (default: /). You can switch vhosts later.",
 		},
 	}
 }
@@ -164,20 +184,29 @@ func (p ProfileSelect) handleKey(msg tea.KeyMsg) (ProfileSelect, tea.Cmd) {
 		return p.handleFormKey(msg)
 	case modeConfirmDelete:
 		return p.handleDeleteConfirm(key)
+	case modeThemePicker:
+		return p.handleThemeKey(key)
 	default:
 		return p.handleSelectKey(key)
 	}
 }
 
+// itemCount returns total selectable items: profiles + "Add new" + "Theme"
+func (p ProfileSelect) itemCount() int {
+	return len(p.config.ProfileNames()) + 2
+}
+
 func (p ProfileSelect) handleSelectKey(key string) (ProfileSelect, tea.Cmd) {
 	names := p.config.ProfileNames()
-	totalItems := len(names) + 1 // profiles + "Add new"
+	total := p.itemCount()
+	addIdx := len(names)
+	themeIdx := len(names) + 1
 
 	switch key {
 	case "q":
 		return p, tea.Quit
 	case "j", "down":
-		if p.cursor < totalItems-1 {
+		if p.cursor < total-1 {
 			p.cursor++
 		}
 	case "k", "up":
@@ -185,7 +214,7 @@ func (p ProfileSelect) handleSelectKey(key string) (ProfileSelect, tea.Cmd) {
 			p.cursor--
 		}
 	case "enter":
-		if p.cursor < len(names) {
+		if p.cursor < addIdx {
 			name := names[p.cursor]
 			profile, err := p.config.GetProfile(name)
 			if err == nil {
@@ -193,19 +222,66 @@ func (p ProfileSelect) handleSelectKey(key string) (ProfileSelect, tea.Cmd) {
 					return profileChosenMsg{name: name, profile: profile}
 				}
 			}
-		} else {
+		} else if p.cursor == addIdx {
 			p.enterAddMode()
 			return p, textinput.Blink
+		} else if p.cursor == themeIdx {
+			return p.enterThemePicker()
 		}
 	case "e":
-		if p.cursor < len(names) {
+		if p.cursor < addIdx {
 			p.enterEditMode(names[p.cursor])
 			return p, textinput.Blink
 		}
 	case "d", "x":
-		if p.cursor < len(names) {
+		if p.cursor < addIdx {
 			p.mode = modeConfirmDelete
 			p.formErr = ""
+		}
+	case "t":
+		return p.enterThemePicker()
+	}
+	return p, nil
+}
+
+func (p ProfileSelect) enterThemePicker() (ProfileSelect, tea.Cmd) {
+	p.mode = modeThemePicker
+	p.themeCursor = 0
+	for i, name := range ThemeNames() {
+		if name == p.config.Theme {
+			p.themeCursor = i
+			break
+		}
+	}
+	return p, nil
+}
+
+func (p ProfileSelect) handleThemeKey(key string) (ProfileSelect, tea.Cmd) {
+	names := ThemeNames()
+	switch key {
+	case "esc":
+		p.mode = modeSelectProfile
+	case "j", "down":
+		if p.themeCursor < len(names)-1 {
+			p.themeCursor++
+		}
+		ApplyTheme(names[p.themeCursor])
+	case "k", "up":
+		if p.themeCursor > 0 {
+			p.themeCursor--
+		}
+		ApplyTheme(names[p.themeCursor])
+	case "enter":
+		themeName := names[p.themeCursor]
+		ApplyTheme(themeName)
+		p.config.Theme = themeName
+		p.mode = modeSelectProfile
+		// Save theme preference
+		cfg := p.config
+		configPath := p.configPath
+		return p, func() tea.Msg {
+			_ = cfg.Save(configPath)
+			return nil
 		}
 	}
 	return p, nil
@@ -379,7 +455,6 @@ func (p ProfileSelect) submitForm() (ProfileSelect, tea.Cmd) {
 	editingName := p.editingName
 
 	return p, func() tea.Msg {
-		// If editing and name changed, delete old profile
 		if editingName != "" && editingName != name {
 			delete(cfg.Profiles, editingName)
 		}
@@ -391,14 +466,25 @@ func (p ProfileSelect) submitForm() (ProfileSelect, tea.Cmd) {
 	}
 }
 
+// renderCentered places a box centered on a solid full-screen background.
+func (p ProfileSelect) renderCentered(box string) string {
+	return lipgloss.Place(p.width, p.height, lipgloss.Center, lipgloss.Center, box)
+}
+
 // Views
 
 func (p ProfileSelect) View() string {
+	if p.width == 0 || p.height == 0 {
+		return ""
+	}
+
 	switch p.mode {
 	case modeAddProfile:
 		return p.viewForm("New Connection")
 	case modeEditProfile:
 		return p.viewForm("Edit Connection")
+	case modeThemePicker:
+		return p.viewThemePicker()
 	default:
 		return p.viewSelect()
 	}
@@ -406,24 +492,30 @@ func (p ProfileSelect) View() string {
 
 func (p ProfileSelect) viewSelect() string {
 	names := p.config.ProfileNames()
+	addIdx := len(names)
+	themeIdx := len(names) + 1
 
-	titleStyle := lipgloss.NewStyle().
-		Foreground(ColorAccent).
-		Bold(true).
-		MarginBottom(1)
+	const itemWidth = 62
 
-	subtitleStyle := lipgloss.NewStyle().
-		Foreground(ColorMuted).
-		MarginBottom(2)
-
-	logo := lipgloss.NewStyle().
-		Foreground(ColorAccent).
-		Bold(true).
-		Render("rabbitpeek")
+	// Helpers for consistent-width items
+	renderItem := func(text string, selected bool) string {
+		if selected {
+			return StyleProfileSelected.Width(itemWidth).Render(text)
+		}
+		return StyleProfileItem.Width(itemWidth).Render(text)
+	}
 
 	var b strings.Builder
-	b.WriteString(titleStyle.Render("  " + logo))
-	b.WriteString("\n")
+
+	// ASCII art logo
+	logoStyle := lipgloss.NewStyle().
+		Foreground(ColorAccent).
+		Bold(true)
+	b.WriteString(logoStyle.Render(asciiLogo))
+	b.WriteString("\n\n")
+
+	subtitleStyle := lipgloss.NewStyle().
+		Foreground(ColorMuted)
 	b.WriteString(subtitleStyle.Render("  RabbitMQ Queue Inspector"))
 	b.WriteString("\n\n")
 
@@ -440,17 +532,16 @@ func (p ProfileSelect) viewSelect() string {
 			if profile.TLS {
 				scheme = "https"
 			}
-			detail := fmt.Sprintf("%s://%s:%d", scheme, profile.Host, profile.Port)
+			detail := lipgloss.NewStyle().Foreground(ColorMuted).Render(
+				fmt.Sprintf("%s://%s:%d", scheme, profile.Host, profile.Port))
 
-			if i == p.cursor {
-				b.WriteString(StyleProfileSelected.Width(60).Render(
-					fmt.Sprintf("  > %s  %s", name, lipgloss.NewStyle().Foreground(ColorMuted).Render(detail))))
-			} else {
-				b.WriteString(StyleProfileItem.Render(
-					fmt.Sprintf("    %s  %s", name, lipgloss.NewStyle().Foreground(ColorMuted).Render(detail))))
+			sel := i == p.cursor
+			prefix := "    "
+			if sel {
+				prefix = "  > "
 			}
+			b.WriteString(renderItem(fmt.Sprintf("%s%s  %s", prefix, name, detail), sel))
 
-			// Delete confirmation inline
 			if i == p.cursor && p.mode == modeConfirmDelete {
 				b.WriteString("\n")
 				b.WriteString(StyleSearchError.Render("    Delete this profile? (y/n)"))
@@ -467,20 +558,39 @@ func (p ProfileSelect) viewSelect() string {
 		b.WriteString("\n\n")
 	}
 
-	addIdx := len(names)
-	if p.cursor == addIdx {
-		b.WriteString(StyleProfileSelected.Width(60).Render("  > + Add new connection"))
-	} else {
-		addStyle := lipgloss.NewStyle().Foreground(ColorSuccess)
-		b.WriteString(StyleProfileItem.Render("    " + addStyle.Render("+ Add new connection")))
+	// "Add new connection" item
+	{
+		sel := p.cursor == addIdx
+		prefix := "    "
+		if sel {
+			prefix = "  > "
+		}
+		label := prefix + lipgloss.NewStyle().Foreground(ColorSuccess).Render("+ Add new connection")
+		b.WriteString(renderItem(label, sel))
+		b.WriteString("\n\n")
 	}
-	b.WriteString("\n\n")
+
+	// "Theme" item
+	{
+		sel := p.cursor == themeIdx
+		prefix := "    "
+		if sel {
+			prefix = "  > "
+		}
+		themeName := p.config.Theme
+		if themeName == "" {
+			themeName = "slack"
+		}
+		label := fmt.Sprintf("%sTheme: %s", prefix, themeName)
+		b.WriteString(renderItem(label, sel))
+		b.WriteString("\n\n")
+	}
 
 	hintStyle := lipgloss.NewStyle().Foreground(ColorMuted)
 	if p.mode == modeConfirmDelete {
 		b.WriteString(hintStyle.Render("  y confirm delete  any other key cancel"))
 	} else {
-		b.WriteString(hintStyle.Render("  j/k navigate  enter connect  e edit  d delete  q quit"))
+		b.WriteString(hintStyle.Render("  j/k navigate  enter select  e edit  d delete  t theme  q quit"))
 	}
 
 	if p.formErr != "" {
@@ -492,14 +602,61 @@ func (p ProfileSelect) viewSelect() string {
 
 	boxStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#2C2D31")).
+		BorderForeground(ColorDivider).
 		Padding(1, 2).
-		Background(ColorSidebarBg)
+		Width(itemWidth + 8). // fixed box width
+		Foreground(ColorPrimary)
 
 	box := boxStyle.Render(content)
 
-	return lipgloss.Place(p.width, p.height, lipgloss.Center, lipgloss.Center, box,
-		lipgloss.WithWhitespaceBackground(ColorBg))
+	return p.renderCentered(box)
+}
+
+func (p ProfileSelect) viewThemePicker() string {
+	names := ThemeNames()
+
+	var b strings.Builder
+
+	titleStyle := lipgloss.NewStyle().
+		Foreground(ColorAccent).
+		Bold(true)
+	b.WriteString(titleStyle.Render("  Select Theme"))
+	b.WriteString("\n\n")
+
+	for i, name := range names {
+		t := Themes[name]
+		// Color preview swatches
+		preview := lipgloss.NewStyle().Foreground(t.Accent).Render("*") +
+			lipgloss.NewStyle().Foreground(t.Success).Render("*") +
+			lipgloss.NewStyle().Foreground(t.Error).Render("*") +
+			lipgloss.NewStyle().Foreground(t.Selected).Render("*") +
+			lipgloss.NewStyle().Foreground(t.Primary).Render("*")
+
+		if i == p.themeCursor {
+			b.WriteString(StyleProfileSelected.Width(40).Render(
+				fmt.Sprintf("  > %s  %s", name, preview)))
+		} else {
+			b.WriteString(StyleProfileItem.Render(
+				fmt.Sprintf("    %s  %s", name, preview)))
+		}
+		b.WriteString("\n")
+	}
+
+	b.WriteString("\n")
+	hintStyle := lipgloss.NewStyle().Foreground(ColorMuted)
+	b.WriteString(hintStyle.Render("  j/k preview  enter apply  esc cancel"))
+
+	content := b.String()
+
+	boxStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(ColorAccent).
+		Padding(1, 2).
+		Foreground(ColorPrimary)
+
+	box := boxStyle.Render(content)
+
+	return p.renderCentered(box)
 }
 
 func (p ProfileSelect) viewForm(title string) string {
@@ -573,10 +730,9 @@ func (p ProfileSelect) viewForm(title string) string {
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(ColorAccent).
 		Padding(1, 2).
-		Background(ColorSidebarBg)
+		Foreground(ColorPrimary)
 
 	box := boxStyle.Render(content)
 
-	return lipgloss.Place(p.width, p.height, lipgloss.Center, lipgloss.Center, box,
-		lipgloss.WithWhitespaceBackground(ColorBg))
+	return p.renderCentered(box)
 }

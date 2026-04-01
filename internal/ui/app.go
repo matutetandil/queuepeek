@@ -4,21 +4,13 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/charmbracelet/bubbles/help"
+	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/spinner"
-	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/matutedenda/rabbitpeek/internal/config"
 	"github.com/matutedenda/rabbitpeek/internal/rabbit"
-)
-
-// Layout constants
-const (
-	sidebarRatio    = 0.25
-	minSidebarWidth = 20
-	statusBarHeight = 1
-	searchBarHeight = 1
-	dividerWidth    = 1
 )
 
 type screen int
@@ -28,12 +20,11 @@ const (
 	screenMain
 )
 
-type focus int
+type panel int
 
 const (
-	focusSidebar focus = iota
-	focusMessages
-	focusSearch
+	panelQueues panel = iota
+	panelMessages
 )
 
 type overlay int
@@ -47,6 +38,7 @@ const (
 // Async messages
 type queuesLoadedMsg struct {
 	queues []rabbit.Queue
+	vhost  string
 	err    error
 }
 
@@ -55,6 +47,16 @@ type messagesLoadedMsg struct {
 	queueName  string
 	totalCount int
 	err        error
+}
+
+type vhostsLoadedMsg struct {
+	vhosts []string
+	err    error
+}
+
+type clusterInfoMsg struct {
+	clusterName string
+	err         error
 }
 
 type statusMsg struct {
@@ -75,27 +77,29 @@ type App struct {
 	configPath string
 
 	profileName string
-	sidebar     Sidebar
-	messages    MessagePanel
-	searchBar   SearchBar
-	statusBar   StatusBar
-	spinner     spinner.Model
+	clusterName string
 
-	focus   focus
-	overlay overlay
+	// Vhost state
+	vhosts        []string
+	selectedVhost string
 
-	profileIdx int
+	// UI components
+	queueList  list.Model
+	messages   MessagePanel
+	helpModel  help.Model
+	spinner    spinner.Model
+
+	allQueues  []rabbit.Queue
+	activePanel panel
+	overlay     overlay
+	profileIdx  int
+
 	loading    bool
+	fetchCount int
 
-	// Dimensions — authoritative, set only in Update on WindowSizeMsg
 	width  int
 	height int
 	ready  bool
-
-	// Computed sub-dimensions, updated by updateLayout
-	sidebarWidth  int
-	mainWidth     int
-	contentHeight int
 }
 
 func NewApp(cfg *config.Config, configPath string) App {
@@ -103,14 +107,16 @@ func NewApp(cfg *config.Config, configPath string) App {
 	s.Spinner = spinner.Dot
 	s.Style = StyleSpinner
 
+	h := help.New()
+
 	return App{
 		screen:     screenProfileSelect,
 		profileSel: NewProfileSelect(cfg, configPath),
 		config:     cfg,
 		configPath: configPath,
-		messages:   NewMessagePanel(),
-		searchBar:  NewSearchBar(),
+		helpModel:  h,
 		spinner:    s,
+		fetchCount: 50,
 	}
 }
 
@@ -118,32 +124,61 @@ func (a App) Init() tea.Cmd {
 	return a.spinner.Tick
 }
 
-// updateLayout computes all sub-dimensions from a.width/a.height and pushes
-// them to every child component. Called ONLY from Update, never from View.
+func (a *App) initMainScreen(profileName string) {
+	a.profileName = profileName
+	a.screen = screenMain
+	a.activePanel = panelQueues
+
+	// Queue list with built-in filtering
+	delegate := list.NewDefaultDelegate()
+	delegate.Styles.SelectedTitle = delegate.Styles.SelectedTitle.
+		Foreground(ColorAccent).
+		BorderLeftForeground(ColorAccent)
+	delegate.Styles.SelectedDesc = delegate.Styles.SelectedDesc.
+		Foreground(ColorMuted).
+		BorderLeftForeground(ColorAccent)
+
+	a.queueList = list.New(nil, delegate, 0, 0)
+	a.queueList.Title = "Queues"
+	a.queueList.SetShowHelp(false)
+	a.queueList.SetShowStatusBar(true)
+	a.queueList.SetFilteringEnabled(true)
+	a.queueList.Styles.Title = lipgloss.NewStyle().
+		Foreground(ColorAccent).
+		Bold(true).
+		Padding(0, 1)
+	a.queueList.Styles.FilterPrompt = lipgloss.NewStyle().Foreground(ColorAccent)
+	a.queueList.Styles.FilterCursor = lipgloss.NewStyle().Foreground(ColorAccent)
+
+	a.messages = NewMessagePanel()
+	a.helpModel = help.New()
+}
+
 func (a *App) updateLayout() {
 	if a.width == 0 || a.height == 0 {
 		return
 	}
 
-	a.sidebarWidth = int(float64(a.width) * sidebarRatio)
-	if a.sidebarWidth < minSidebarWidth {
-		a.sidebarWidth = minSidebarWidth
-	}
-	a.mainWidth = a.width - a.sidebarWidth - dividerWidth
-	if a.mainWidth < 1 {
-		a.mainWidth = 1
-	}
-	a.contentHeight = a.height - statusBarHeight - searchBarHeight
-	if a.contentHeight < 1 {
-		a.contentHeight = 1
+	// Header: 1 line, Help footer: 1 line
+	contentH := a.height - 2
+	if contentH < 1 {
+		contentH = 1
 	}
 
-	a.sidebar.SetSize(a.sidebarWidth, a.contentHeight)
-	a.sidebar.SetFocused(a.focus == focusSidebar)
-	a.messages.SetSize(a.mainWidth, a.contentHeight)
-	a.messages.SetFocused(a.focus == focusMessages)
-	a.searchBar.SetWidth(a.mainWidth)
-	a.statusBar.SetWidth(a.width)
+	// Split: left panel (queues) ~30%, right panel (messages) ~70%
+	leftW := a.width * 3 / 10
+	if leftW < 25 {
+		leftW = 25
+	}
+	rightW := a.width - leftW - 1 // 1 for divider
+	if rightW < 20 {
+		rightW = 20
+	}
+
+	a.queueList.SetSize(leftW, contentH)
+	a.messages.SetSize(rightW, contentH)
+
+	a.helpModel.Width = a.width
 }
 
 func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -153,7 +188,9 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.height = msg.Height
 		a.ready = true
 		a.profileSel.SetSize(msg.Width, msg.Height)
-		a.updateLayout()
+		if a.screen == screenMain {
+			a.updateLayout()
+		}
 	}
 
 	if a.screen == screenProfileSelect {
@@ -173,21 +210,18 @@ func (a App) updateProfileSelect(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, nil
 		}
 		a.client = client
-		a.profileName = msg.name
-		a.screen = screenMain
-		a.sidebar = NewSidebar(msg.name, client.Vhost())
-		a.messages = NewMessagePanel()
-		a.searchBar = NewSearchBar()
-		a.statusBar = NewStatusBar(msg.name)
-		a.focus = focusSidebar
+		a.initMainScreen(msg.name)
 		a.loading = true
 		a.updateLayout()
-		return a, tea.Batch(a.spinner.Tick, a.loadQueues())
+		return a, tea.Batch(
+			a.spinner.Tick,
+			a.loadVhosts(),
+			a.loadClusterInfo(),
+		)
 
 	case profileSavedMsg:
 		if msg.err != nil {
 			a.profileSel.formErr = fmt.Sprintf("Error saving: %s", msg.err)
-			return a, nil
 		}
 		return a, nil
 
@@ -226,61 +260,91 @@ func (a App) updateMain(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, cmd)
 		}
 
+	case vhostsLoadedMsg:
+		if msg.err != nil {
+			a.queueList.NewStatusMessage(fmt.Sprintf("Error: %s", msg.err))
+			a.loading = false
+		} else {
+			a.vhosts = msg.vhosts
+			initialVhost := a.client.Vhost()
+			found := false
+			for _, v := range msg.vhosts {
+				if v == initialVhost {
+					found = true
+					break
+				}
+			}
+			if !found && len(msg.vhosts) > 0 {
+				initialVhost = msg.vhosts[0]
+			}
+			a.selectedVhost = initialVhost
+			cmds = append(cmds, a.loadQueuesForVhost(initialVhost))
+		}
+
+	case clusterInfoMsg:
+		if msg.err == nil {
+			a.clusterName = msg.clusterName
+		}
+
 	case queuesLoadedMsg:
+		if msg.vhost != "" && msg.vhost != a.selectedVhost {
+			break
+		}
 		a.loading = false
 		if msg.err != nil {
-			a.statusBar.SetMessage(fmt.Sprintf("Error: %s", msg.err), true)
+			a.queueList.NewStatusMessage(fmt.Sprintf("Error: %s", msg.err))
 		} else {
-			a.sidebar.SetQueues(msg.queues)
-			a.statusBar.SetMessage(fmt.Sprintf("Loaded %d queues", len(msg.queues)), false)
-			if q := a.sidebar.SelectedQueue(); q != nil {
+			a.allQueues = msg.queues
+			items := make([]list.Item, len(msg.queues))
+			for i, q := range msg.queues {
+				items[i] = QueueItem{queue: q}
+			}
+			cmd := a.queueList.SetItems(items)
+			cmds = append(cmds, cmd)
+
+			// Auto-peek first queue
+			if len(msg.queues) > 0 {
 				a.loading = true
-				cmds = append(cmds, a.spinner.Tick, a.loadMessages(q.Vhost, q.Name))
+				cmds = append(cmds, a.spinner.Tick, a.loadMessages(a.selectedVhost, msg.queues[0].Name))
 			}
 		}
 
 	case messagesLoadedMsg:
 		a.loading = false
 		if msg.err != nil {
-			a.statusBar.SetMessage(fmt.Sprintf("Error: %s", msg.err), true)
+			a.queueList.NewStatusMessage(fmt.Sprintf("Error: %s", msg.err))
 		} else {
 			a.messages.SetMessages(msg.messages, msg.queueName, msg.totalCount)
-			a.statusBar.SetMessage(fmt.Sprintf("Loaded %d messages from %s", len(msg.messages), msg.queueName), false)
+			a.queueList.NewStatusMessage(fmt.Sprintf("Loaded %d msgs from %s", len(msg.messages), msg.queueName))
 		}
-
-	case statusMsg:
-		a.statusBar.SetMessage(msg.text, msg.isError)
 
 	case switchProfileMsg:
 		newClient, err := rabbit.NewClient(msg.profile)
 		if err != nil {
-			a.statusBar.SetMessage(fmt.Sprintf("Error switching profile: %s", err), true)
+			a.queueList.NewStatusMessage(fmt.Sprintf("Error: %s", err))
 		} else {
 			a.client = newClient
-			a.profileName = msg.name
-			a.sidebar = NewSidebar(msg.name, newClient.Vhost())
-			a.messages = NewMessagePanel()
-			a.statusBar.SetProfile(msg.name)
-			a.updateLayout()
-			a.loading = true
+			a.initMainScreen(msg.name)
 			a.overlay = overlayNone
-			cmds = append(cmds, a.spinner.Tick, a.loadQueues())
+			a.loading = true
+			a.updateLayout()
+			cmds = append(cmds, a.spinner.Tick, a.loadVhosts(), a.loadClusterInfo())
 		}
 	}
 
-	// Update search bar text input when focused
-	if a.focus == focusSearch {
+	// Forward messages to active panel
+	if a.activePanel == panelQueues && a.overlay == overlayNone {
 		var cmd tea.Cmd
-		input := a.searchBar.Input()
-		*input, cmd = input.Update(msg)
+		a.queueList, cmd = a.queueList.Update(msg)
 		if cmd != nil {
 			cmds = append(cmds, cmd)
 		}
-		a.messages.SetSearch(a.searchBar.Value())
-		if errMsg := a.messages.SearchError(); errMsg != "" {
-			a.searchBar.SetError(errMsg)
-		} else {
-			a.searchBar.SetError("")
+	} else if a.activePanel == panelMessages && a.overlay == overlayNone {
+		var cmd tea.Cmd
+		vp := a.messages.Viewport()
+		*vp, cmd = vp.Update(msg)
+		if cmd != nil {
+			cmds = append(cmds, cmd)
 		}
 	}
 
@@ -297,143 +361,115 @@ func (a *App) handleKey(msg tea.KeyMsg) tea.Cmd {
 		return tea.Quit
 	}
 
-	// Overlay keys
-	if a.overlay == overlayHelp {
-		if key == "?" || key == "f1" || key == "esc" || key == "enter" {
-			a.overlay = overlayNone
-		}
-		return nil
-	}
-	if a.overlay == overlayProfile {
-		return a.handleProfileOverlay(key)
+	// Overlays
+	if a.overlay != overlayNone {
+		return a.handleOverlayKey(key)
 	}
 
-	// Search input mode
-	if a.focus == focusSearch {
-		switch key {
-		case "esc":
-			a.searchBar.Clear()
-			a.searchBar.Blur()
-			a.messages.SetSearch("")
-			a.focus = focusMessages
-		case "enter":
-			a.searchBar.Blur()
-			a.focus = focusMessages
-		}
-		return nil
+	// If the queue list is filtering, let it handle all keys
+	if a.queueList.SettingFilter() {
+		return nil // keys forwarded via updateMain
 	}
 
-	// Normal mode
 	switch key {
 	case "q":
 		return tea.Quit
 
-	case "?", "f1":
-		a.overlay = overlayHelp
+	case "?":
+		a.helpModel.ShowAll = !a.helpModel.ShowAll
+		return nil
 
 	case "tab":
-		if a.focus == focusSidebar {
-			a.focus = focusMessages
-			a.sidebar.SetFocused(false)
-			a.messages.SetFocused(true)
+		if a.activePanel == panelQueues {
+			a.activePanel = panelMessages
 		} else {
-			a.focus = focusSidebar
-			a.sidebar.SetFocused(true)
-			a.messages.SetFocused(false)
+			a.activePanel = panelQueues
 		}
-
-	case "j", "down":
-		if a.focus == focusSidebar {
-			a.sidebar.MoveDown()
-		} else {
-			a.messages.MoveDown()
-		}
-
-	case "k", "up":
-		if a.focus == focusSidebar {
-			a.sidebar.MoveUp()
-		} else {
-			a.messages.MoveUp()
-		}
+		return nil
 
 	case "enter":
-		if a.focus == focusSidebar {
-			if q := a.sidebar.SelectedQueue(); q != nil {
+		if a.activePanel == panelQueues {
+			if item, ok := a.queueList.SelectedItem().(QueueItem); ok {
+				a.activePanel = panelMessages
 				a.loading = true
-				return tea.Batch(a.spinner.Tick, a.loadMessages(q.Vhost, q.Name))
+				return tea.Batch(a.spinner.Tick, a.loadMessages(a.selectedVhost, item.queue.Name))
 			}
 		}
+		return nil
 
 	case "r":
-		if q := a.sidebar.SelectedQueue(); q != nil {
+		if sel, ok := a.queueList.SelectedItem().(QueueItem); ok {
 			a.loading = true
-			a.statusBar.SetMessage("Reloading messages...", false)
-			return tea.Batch(a.spinner.Tick, a.loadMessages(q.Vhost, q.Name))
+			return tea.Batch(a.spinner.Tick, a.loadMessages(a.selectedVhost, sel.queue.Name))
 		}
+		return nil
 
 	case "R":
 		a.loading = true
-		a.statusBar.SetMessage("Reloading queues...", false)
-		return tea.Batch(a.spinner.Tick, a.loadQueues())
+		return tea.Batch(a.spinner.Tick, a.loadQueuesForVhost(a.selectedVhost))
 
-	case "n":
-		if q := a.sidebar.SelectedQueue(); q != nil {
-			a.loading = true
-			a.statusBar.SetMessage("Fetching messages...", false)
-			return tea.Batch(a.spinner.Tick, a.loadMessages(q.Vhost, q.Name))
+	case "v":
+		// Cycle vhost
+		if len(a.vhosts) > 1 {
+			idx := 0
+			for i, v := range a.vhosts {
+				if v == a.selectedVhost {
+					idx = (i + 1) % len(a.vhosts)
+					break
+				}
+			}
+			return a.switchVhost(a.vhosts[idx])
 		}
-
-	case "/":
-		a.focus = focusSearch
-		a.searchBar.Focus()
-		return textinput.Blink
+		return nil
 
 	case "p":
 		a.overlay = overlayProfile
 		a.profileIdx = 0
-
-	case "left", "h":
-		if a.focus == focusMessages {
-			a.messages.ScrollLeft()
-		}
-
-	case "right", "l":
-		if a.focus == focusMessages {
-			a.messages.ScrollRight()
-		}
+		return nil
 
 	case "+", "=":
-		a.statusBar.IncreaseFetchCount()
-		a.statusBar.SetMessage(fmt.Sprintf("Fetch count: %d", a.statusBar.FetchCount()), false)
+		if a.fetchCount < 500 {
+			a.fetchCount += 10
+		}
+		a.queueList.NewStatusMessage(fmt.Sprintf("Fetch count: %d", a.fetchCount))
+		return nil
 
 	case "-":
-		a.statusBar.DecreaseFetchCount()
-		a.statusBar.SetMessage(fmt.Sprintf("Fetch count: %d", a.statusBar.FetchCount()), false)
+		if a.fetchCount > 1 {
+			a.fetchCount -= 10
+			if a.fetchCount < 1 {
+				a.fetchCount = 1
+			}
+		}
+		a.queueList.NewStatusMessage(fmt.Sprintf("Fetch count: %d", a.fetchCount))
+		return nil
 	}
 
 	return nil
 }
 
-func (a *App) handleProfileOverlay(key string) tea.Cmd {
-	names := a.config.ProfileNames()
-	switch key {
-	case "esc":
-		a.overlay = overlayNone
-	case "j", "down":
-		if a.profileIdx < len(names)-1 {
-			a.profileIdx++
-		}
-	case "k", "up":
-		if a.profileIdx > 0 {
-			a.profileIdx--
-		}
-	case "enter":
-		if a.profileIdx < len(names) {
-			name := names[a.profileIdx]
-			profile, err := a.config.GetProfile(name)
-			if err == nil {
-				return func() tea.Msg {
-					return switchProfileMsg{name: name, profile: profile}
+func (a *App) handleOverlayKey(key string) tea.Cmd {
+	if a.overlay == overlayProfile {
+		names := a.config.ProfileNames()
+		switch key {
+		case "esc":
+			a.overlay = overlayNone
+		case "j", "down":
+			if a.profileIdx < len(names)-1 {
+				a.profileIdx++
+			}
+		case "k", "up":
+			if a.profileIdx > 0 {
+				a.profileIdx--
+			}
+		case "enter":
+			if a.profileIdx < len(names) {
+				name := names[a.profileIdx]
+				profile, err := a.config.GetProfile(name)
+				if err == nil {
+					return func() tea.Msg {
+						return switchProfileMsg{name: name, profile: profile}
+					}
 				}
 			}
 		}
@@ -441,100 +477,96 @@ func (a *App) handleProfileOverlay(key string) tea.Cmd {
 	return nil
 }
 
-// View renders the entire UI. No mutations happen here.
+func (a *App) switchVhost(newVhost string) tea.Cmd {
+	a.selectedVhost = newVhost
+	a.allQueues = nil
+	a.messages = NewMessagePanel()
+	a.messages.SetSize(a.width-a.width*3/10-1, a.height-2)
+	a.loading = true
+	a.queueList.NewStatusMessage(fmt.Sprintf("Switching to vhost: %s", newVhost))
+	return tea.Batch(a.spinner.Tick, a.loadQueuesForVhost(newVhost))
+}
+
+// View
+
 func (a App) View() string {
-	// Guard: before first WindowSizeMsg
 	if a.width == 0 || a.height == 0 {
 		return ""
 	}
-
 	if !a.ready {
 		return fmt.Sprintf("\n  %s Loading rabbitpeek...", a.spinner.View())
 	}
-
-	// Profile select screen
 	if a.screen == screenProfileSelect {
 		return a.profileSel.View()
 	}
 
-	// Minimum terminal size guard
-	if a.width < MinTermWidth || a.height < MinTermHeight {
-		msg := fmt.Sprintf(
-			"Terminal too small. Minimum size: %dx%d\nCurrent: %dx%d",
-			MinTermWidth, MinTermHeight, a.width, a.height)
-		style := lipgloss.NewStyle().
-			Foreground(ColorAccent).
-			Bold(true)
-		return lipgloss.Place(a.width, a.height, lipgloss.Center, lipgloss.Center,
-			style.Render(msg),
-			lipgloss.WithWhitespaceBackground(ColorBg))
+	// Header
+	headerView := a.renderHeader()
+
+	// Content height
+	contentH := a.height - 2
+	if contentH < 1 {
+		contentH = 1
 	}
 
-	// Main layout
-	sidebarView := a.sidebar.View()
+	// Queue list (left)
+	queueView := a.queueList.View()
 
-	var mainPanelView string
+	// Messages (right)
+	var msgView string
 	if a.loading {
-		loadingStyle := lipgloss.NewStyle().
-			Background(ColorBg).
-			Width(a.mainWidth).
-			Height(a.contentHeight).
-			Padding(0, 1)
-		mainPanelView = loadingStyle.Render(fmt.Sprintf("\n  %s Loading...", a.spinner.View()))
+		msgView = lipgloss.NewStyle().
+			Width(a.width - a.width*3/10 - 1).
+			Height(contentH).
+			Render(fmt.Sprintf("\n  %s Loading...", a.spinner.View()))
 	} else {
-		mainPanelView = a.messages.View()
+		msgView = a.messages.View()
 	}
 
-	searchView := a.searchBar.View()
-	rightPanel := lipgloss.JoinVertical(lipgloss.Left, mainPanelView, searchView)
-
-	// Vertical divider
+	// Divider
 	divider := lipgloss.NewStyle().
-		Width(dividerWidth).
 		Foreground(ColorDivider).
-		Render(strings.Repeat("|\n", a.contentHeight+searchBarHeight))
+		Render(strings.Repeat("│\n", contentH))
 
-	mainView := lipgloss.JoinHorizontal(lipgloss.Top, sidebarView, divider, rightPanel)
+	// Join panels
+	panels := lipgloss.JoinHorizontal(lipgloss.Top, queueView, divider, msgView)
 
-	statusView := a.statusBar.View()
-	fullView := lipgloss.JoinVertical(lipgloss.Left, mainView, statusView)
+	// Help footer
+	helpView := a.helpModel.View(Keys)
 
-	// Overlays
-	if a.overlay == overlayHelp {
-		fullView = a.renderOverlay(fullView, a.helpView())
-	} else if a.overlay == overlayProfile {
+	// Stack
+	fullView := lipgloss.JoinVertical(lipgloss.Left, headerView, panels, helpView)
+
+	// Profile overlay
+	if a.overlay == overlayProfile {
 		fullView = a.renderOverlay(fullView, a.profileView())
 	}
 
 	return fullView
 }
 
-func (a App) helpView() string {
-	help := []struct{ key, desc string }{
-		{"?/F1", "Toggle help"},
-		{"Tab", "Switch focus sidebar <-> messages"},
-		{"j/k up/dn", "Navigate lists"},
-		{"Enter", "Select queue / peek messages"},
-		{"r", "Reload current queue messages"},
-		{"R", "Reload queue list"},
-		{"/", "Focus search bar"},
-		{"Esc", "Clear search / close overlay"},
-		{"p", "Switch profile"},
-		{"n", "Fetch messages from selected queue"},
-		{"h/l lt/rt", "Horizontal scroll (message panel)"},
-		{"+/-", "Increase/decrease fetch count"},
-		{"q/Ctrl+C", "Quit"},
+func (a App) renderHeader() string {
+	accentStyle := lipgloss.NewStyle().Foreground(ColorAccent).Bold(true)
+	mutedStyle := lipgloss.NewStyle().Foreground(ColorMuted)
+	sepStyle := lipgloss.NewStyle().Foreground(ColorDivider)
+	sep := sepStyle.Render(" │ ")
+
+	left := accentStyle.Render("  rabbitpeek")
+
+	if a.clusterName != "" {
+		left += sep + mutedStyle.Render(a.clusterName)
 	}
 
-	var lines string
-	for _, h := range help {
-		lines += fmt.Sprintf("  %s  %s\n",
-			StyleHelpKey.Width(14).Render(h.key),
-			StyleHelpDesc.Render(h.desc))
+	left += sep + mutedStyle.Render("vhost:") + " " + accentStyle.Render(a.selectedVhost)
+	if len(a.vhosts) > 1 {
+		left += " " + mutedStyle.Render(fmt.Sprintf("[v: cycle %d]", len(a.vhosts)))
 	}
 
-	title := StyleMessageHeader.Render("  Keyboard Shortcuts")
-	return StyleHelpOverlay.Render(title + "\n\n" + lines)
+	left += sep + mutedStyle.Render(fmt.Sprintf("fetch: %d", a.fetchCount))
+
+	return lipgloss.NewStyle().
+		Width(a.width).
+		Render(left)
 }
 
 func (a App) profileView() string {
@@ -555,26 +587,23 @@ func (a App) profileView() string {
 	return StyleProfileOverlay.Render(title + "\n\n" + lines)
 }
 
-func (a App) renderOverlay(base, overlayContent string) string {
-	overlayW := lipgloss.Width(overlayContent)
-	overlayH := lipgloss.Height(overlayContent)
-
-	x := (a.width - overlayW) / 2
-	y := (a.height - overlayH) / 2
+func (a App) renderOverlay(base, content string) string {
+	w := lipgloss.Width(content)
+	h := lipgloss.Height(content)
+	x := (a.width - w) / 2
+	y := (a.height - h) / 2
 	if x < 0 {
 		x = 0
 	}
 	if y < 0 {
 		y = 0
 	}
-
-	return placeOverlay(x, y, overlayContent, base)
+	return placeOverlay(x, y, content, base)
 }
 
 func placeOverlay(x, y int, fg, bg string) string {
 	bgLines := splitLines(bg)
 	fgLines := splitLines(fg)
-
 	for i, fgLine := range fgLines {
 		row := y + i
 		if row < 0 || row >= len(bgLines) {
@@ -582,7 +611,6 @@ func placeOverlay(x, y int, fg, bg string) string {
 		}
 		bgRunes := []rune(bgLines[row])
 		fgRunes := []rune(fgLine)
-
 		var newLine []rune
 		if x > 0 {
 			if x <= len(bgRunes) {
@@ -601,7 +629,6 @@ func placeOverlay(x, y int, fg, bg string) string {
 		}
 		bgLines[row] = string(newLine)
 	}
-
 	return strings.Join(bgLines, "\n")
 }
 
@@ -620,17 +647,36 @@ func splitLines(s string) []string {
 
 // Commands
 
-func (a *App) loadQueues() tea.Cmd {
+func (a *App) loadVhosts() tea.Cmd {
 	client := a.client
 	return func() tea.Msg {
-		queues, err := client.ListQueues(client.Vhost())
-		return queuesLoadedMsg{queues: queues, err: err}
+		vhosts, err := client.ListVhosts()
+		return vhostsLoadedMsg{vhosts: vhosts, err: err}
+	}
+}
+
+func (a *App) loadClusterInfo() tea.Cmd {
+	client := a.client
+	return func() tea.Msg {
+		overview, err := client.GetOverview()
+		if err != nil {
+			return clusterInfoMsg{err: err}
+		}
+		return clusterInfoMsg{clusterName: overview.ClusterName}
+	}
+}
+
+func (a *App) loadQueuesForVhost(vhost string) tea.Cmd {
+	client := a.client
+	return func() tea.Msg {
+		queues, err := client.ListQueues(vhost)
+		return queuesLoadedMsg{queues: queues, vhost: vhost, err: err}
 	}
 }
 
 func (a *App) loadMessages(vhost, queue string) tea.Cmd {
 	client := a.client
-	count := a.statusBar.FetchCount()
+	count := a.fetchCount
 	return func() tea.Msg {
 		messages, err := client.PeekMessages(vhost, queue, count)
 		if err != nil {
@@ -640,7 +686,6 @@ func (a *App) loadMessages(vhost, queue string) tea.Cmd {
 			messages:   messages,
 			queueName:  queue,
 			totalCount: len(messages),
-			err:        nil,
 		}
 	}
 }

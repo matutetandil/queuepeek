@@ -13,11 +13,43 @@ import (
 )
 
 type Queue struct {
-	Name      string `json:"name"`
-	Messages  int    `json:"messages"`
-	Consumers int    `json:"consumers"`
-	State     string `json:"state"`
-	Vhost     string `json:"vhost"`
+	Name        string  `json:"name"`
+	Messages    int     `json:"messages"`
+	Consumers   int     `json:"consumers"`
+	State       string  `json:"state"`
+	Vhost       string  `json:"vhost"`
+	PublishRate float64
+	DeliverRate float64
+	AckRate     float64
+}
+
+type queueAPIResponse struct {
+	Name     string `json:"name"`
+	Messages int    `json:"messages"`
+	Consumers int   `json:"consumers"`
+	State    string `json:"state"`
+	Vhost    string `json:"vhost"`
+	MessageStats *struct {
+		PublishDetails *struct {
+			Rate float64 `json:"rate"`
+		} `json:"publish_details"`
+		DeliverDetails *struct {
+			Rate float64 `json:"rate"`
+		} `json:"deliver_details"`
+		AckDetails *struct {
+			Rate float64 `json:"rate"`
+		} `json:"ack_details"`
+	} `json:"message_stats"`
+}
+
+type Overview struct {
+	ClusterName     string
+	RabbitMQVersion string
+}
+
+type overviewAPIResponse struct {
+	ClusterName     string `json:"cluster_name"`
+	RabbitMQVersion string `json:"rabbitmq_version"`
 }
 
 type Message struct {
@@ -118,11 +150,56 @@ func (c *Client) ListQueues(vhost string) ([]Queue, error) {
 		return nil, fmt.Errorf("listing queues: HTTP %d", resp.StatusCode)
 	}
 
-	var queues []Queue
-	if err := json.NewDecoder(resp.Body).Decode(&queues); err != nil {
+	var apiQueues []queueAPIResponse
+	if err := json.NewDecoder(resp.Body).Decode(&apiQueues); err != nil {
 		return nil, fmt.Errorf("decoding queues: %w", err)
 	}
+
+	queues := make([]Queue, len(apiQueues))
+	for i, aq := range apiQueues {
+		q := Queue{
+			Name:      aq.Name,
+			Messages:  aq.Messages,
+			Consumers: aq.Consumers,
+			State:     aq.State,
+			Vhost:     aq.Vhost,
+		}
+		if aq.MessageStats != nil {
+			if aq.MessageStats.PublishDetails != nil {
+				q.PublishRate = aq.MessageStats.PublishDetails.Rate
+			}
+			if aq.MessageStats.DeliverDetails != nil {
+				q.DeliverRate = aq.MessageStats.DeliverDetails.Rate
+			}
+			if aq.MessageStats.AckDetails != nil {
+				q.AckRate = aq.MessageStats.AckDetails.Rate
+			}
+		}
+		queues[i] = q
+	}
 	return queues, nil
+}
+
+func (c *Client) GetOverview() (Overview, error) {
+	resp, err := c.doRequest("GET", "/api/overview", nil)
+	if err != nil {
+		return Overview{}, fmt.Errorf("fetching overview: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return Overview{}, fmt.Errorf("fetching overview: HTTP %d", resp.StatusCode)
+	}
+
+	var apiResp overviewAPIResponse
+	if err := json.NewDecoder(resp.Body).Decode(&apiResp); err != nil {
+		return Overview{}, fmt.Errorf("decoding overview: %w", err)
+	}
+
+	return Overview{
+		ClusterName:     apiResp.ClusterName,
+		RabbitMQVersion: apiResp.RabbitMQVersion,
+	}, nil
 }
 
 type peekRequest struct {

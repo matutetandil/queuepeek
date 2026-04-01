@@ -61,6 +61,7 @@ func (p Profile) TLSConfig() (*tls.Config, error) {
 type Config struct {
 	Profiles       map[string]Profile `mapstructure:"profiles"`
 	DefaultProfile string             `mapstructure:"default_profile"`
+	Theme          string             `mapstructure:"theme"`
 }
 
 func (c *Config) GetProfile(name string) (Profile, error) {
@@ -96,8 +97,12 @@ func (c *Config) Save(path string) error {
 
 	var b strings.Builder
 	if c.DefaultProfile != "" {
-		fmt.Fprintf(&b, "default_profile = %q\n\n", c.DefaultProfile)
+		fmt.Fprintf(&b, "default_profile = %q\n", c.DefaultProfile)
 	}
+	if c.Theme != "" {
+		fmt.Fprintf(&b, "theme = %q\n", c.Theme)
+	}
+	b.WriteString("\n")
 	for name, p := range c.Profiles {
 		fmt.Fprintf(&b, "[profiles.%q]\n", name)
 		fmt.Fprintf(&b, "host = %q\n", p.Host)

@@ -5,24 +5,23 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/charmbracelet/bubbles/viewport"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/matutedenda/rabbitpeek/internal/rabbit"
 	"github.com/tidwall/pretty"
 )
 
 type MessagePanel struct {
+	viewport    viewport.Model
 	messages    []rabbit.Message
 	filtered    []rabbit.Message
-	cursor      int
-	offset      int
-	hScroll     int
-	height      int
 	width       int
-	focused     bool
+	height      int
 	queueName   string
 	totalCount  int
 	searchQuery string
 	searchErr   string
+	ready       bool
 }
 
 func NewMessagePanel() MessagePanel {
@@ -33,30 +32,35 @@ func (m *MessagePanel) SetMessages(msgs []rabbit.Message, queueName string, tota
 	m.messages = msgs
 	m.queueName = queueName
 	m.totalCount = totalCount
-	m.cursor = 0
-	m.offset = 0
-	m.hScroll = 0
 	m.applyFilter()
+	m.renderContent()
+	m.viewport.GotoTop()
 }
 
 func (m *MessagePanel) SetSize(width, height int) {
 	m.width = width
 	m.height = height
-	// Clamp scroll after resize
-	vis := m.visibleItems()
-	if vis > 0 && m.offset > 0 && m.offset+vis > len(m.filtered) {
-		m.offset = max(0, len(m.filtered)-vis)
+	if !m.ready {
+		m.viewport = viewport.New(width, height)
+		m.viewport.MouseWheelEnabled = true
+		m.ready = true
+	} else {
+		m.viewport.Width = width
+		m.viewport.Height = height
 	}
+	m.renderContent()
 }
 
-func (m *MessagePanel) SetFocused(focused bool) {
-	m.focused = focused
+func (m *MessagePanel) SetFocused(_ bool) {
+	// No-op, viewport handles its own focus
 }
 
 func (m *MessagePanel) SetSearch(query string) {
 	m.searchQuery = query
 	m.searchErr = ""
 	m.applyFilter()
+	m.renderContent()
+	m.viewport.GotoTop()
 }
 
 func (m *MessagePanel) applyFilter() {
@@ -81,107 +85,42 @@ func (m *MessagePanel) applyFilter() {
 		}
 	}
 	m.filtered = result
-	if m.cursor >= len(m.filtered) {
-		m.cursor = max(0, len(m.filtered)-1)
-	}
-	m.offset = 0
-}
-
-func (m *MessagePanel) MoveUp() {
-	if m.cursor > 0 {
-		m.cursor--
-		if m.cursor < m.offset {
-			m.offset = m.cursor
-		}
-	}
-}
-
-func (m *MessagePanel) MoveDown() {
-	if m.cursor < len(m.filtered)-1 {
-		m.cursor++
-		vis := m.visibleItems()
-		if m.cursor >= m.offset+vis {
-			m.offset = m.cursor - vis + 1
-		}
-	}
-}
-
-func (m *MessagePanel) ScrollLeft() {
-	if m.hScroll > 0 {
-		m.hScroll -= 4
-		if m.hScroll < 0 {
-			m.hScroll = 0
-		}
-	}
-}
-
-func (m *MessagePanel) ScrollRight() {
-	m.hScroll += 4
-}
-
-func (m *MessagePanel) visibleItems() int {
-	// header=2 lines, each message ~6 lines
-	available := (m.height - 2) / 6
-	if available < 1 {
-		return 1
-	}
-	return available
 }
 
 func (m *MessagePanel) SearchError() string {
 	return m.searchErr
 }
 
-func (m MessagePanel) View() string {
-	if m.width == 0 || m.height == 0 {
-		return ""
+func (m *MessagePanel) Viewport() *viewport.Model {
+	return &m.viewport
+}
+
+func (m *MessagePanel) renderContent() {
+	if m.width == 0 {
+		return
 	}
 
 	var b strings.Builder
-
 	contentWidth := m.width - 4
 	if contentWidth < 1 {
 		contentWidth = 1
 	}
 
-	// Header
-	if m.queueName != "" {
-		header := fmt.Sprintf("  %s  %s",
-			m.queueName,
-			StyleQueueCount.Render(fmt.Sprintf("(%d messages)", m.totalCount)))
-		b.WriteString(StyleMessageHeader.Width(contentWidth).Render(header))
-	} else {
-		b.WriteString(StyleMessageHeader.Width(contentWidth).Render("  Select a queue"))
-	}
-	b.WriteString("\n")
-
 	if len(m.filtered) == 0 {
 		if len(m.messages) == 0 {
-			b.WriteString(StyleMessageMeta.Render("  No messages. Press Enter to peek messages from selected queue."))
+			b.WriteString(StyleMessageMeta.Render("  No messages. Select a queue and press Enter to peek."))
 		} else {
 			b.WriteString(StyleMessageMeta.Render("  No messages match the current filter."))
 		}
-
-		style := lipgloss.NewStyle().
-			Background(ColorBg).
-			Width(m.width).
-			Height(m.height).
-			Padding(0, 1)
-		return style.Render(b.String())
+		m.viewport.SetContent(b.String())
+		return
 	}
 
-	b.WriteString(StyleMessageMeta.Render(fmt.Sprintf("  Showing %d of %d fetched messages", len(m.filtered), len(m.messages))))
+	header := StyleMessageMeta.Render(fmt.Sprintf("  Showing %d of %d messages", len(m.filtered), len(m.messages)))
+	b.WriteString(header)
 	b.WriteString("\n\n")
 
-	visible := m.visibleItems()
-	end := m.offset + visible
-	if end > len(m.filtered) {
-		end = len(m.filtered)
-	}
-
-	for i := m.offset; i < end; i++ {
-		msg := m.filtered[i]
-
+	for i, msg := range m.filtered {
 		// Meta line
 		indexStr := StyleMessageIndex.Render(fmt.Sprintf("#%d", msg.Index))
 		metaParts := []string{indexStr}
@@ -193,7 +132,7 @@ func (m MessagePanel) View() string {
 			metaParts = append(metaParts, StyleMessageMeta.Render(fmt.Sprintf("key=%s", msg.RoutingKey)))
 		}
 		if msg.Exchange != "" {
-			metaParts = append(metaParts, StyleMessageMeta.Render(fmt.Sprintf("exchange=%s", msg.Exchange)))
+			metaParts = append(metaParts, StyleMessageMeta.Render(fmt.Sprintf("ex=%s", msg.Exchange)))
 		}
 		if msg.Redelivered {
 			metaParts = append(metaParts, lipgloss.NewStyle().Foreground(ColorAccent).Render("redelivered"))
@@ -202,37 +141,28 @@ func (m MessagePanel) View() string {
 		b.WriteString("  " + strings.Join(metaParts, "  "))
 		b.WriteString("\n")
 
-		// Body
-		bodyStr := formatBody(msg.BodyString, contentWidth-4, m.hScroll)
+		// Body (compact: max 3 lines)
+		bodyStr := formatBody(msg.BodyString, contentWidth-4)
+		b.WriteString(StyleMessageBody.Padding(0, 2).Render(bodyStr))
 
-		if i == m.cursor && m.focused {
-			bodyStyle := lipgloss.NewStyle().
-				Background(lipgloss.Color("#252729")).
-				Foreground(ColorPrimary).
-				Width(contentWidth - 2).
-				Padding(0, 1)
-			b.WriteString(bodyStyle.Render(bodyStr))
-		} else {
-			b.WriteString(StyleMessageBody.Padding(0, 1).Render(bodyStr))
-		}
-
-		if i < end-1 {
+		if i < len(m.filtered)-1 {
 			b.WriteString("\n")
-			b.WriteString(StyleMessageMeta.Render(strings.Repeat("─", contentWidth-2)))
+			b.WriteString(StyleMessageMeta.Render("  " + strings.Repeat("─", contentWidth-4)))
 			b.WriteString("\n")
 		}
 	}
 
-	style := lipgloss.NewStyle().
-		Background(ColorBg).
-		Width(m.width).
-		Height(m.height).
-		Padding(0, 1)
-
-	return style.Render(b.String())
+	m.viewport.SetContent(b.String())
 }
 
-func formatBody(body string, maxWidth, hScroll int) string {
+func (m MessagePanel) View() string {
+	if m.width == 0 || m.height == 0 {
+		return ""
+	}
+	return m.viewport.View()
+}
+
+func formatBody(body string, maxWidth int) string {
 	trimmed := strings.TrimSpace(body)
 	if strings.HasPrefix(trimmed, "{") || strings.HasPrefix(trimmed, "[") {
 		prettyJSON := pretty.Pretty([]byte(trimmed))
@@ -241,22 +171,17 @@ func formatBody(body string, maxWidth, hScroll int) string {
 		}
 	}
 
-	lines := strings.Split(body, "\n")
+	lines := strings.Split(strings.TrimRight(body, "\n"), "\n")
 	var result []string
 	for _, line := range lines {
-		if hScroll > 0 && len(line) > hScroll {
-			line = line[hScroll:]
-		} else if hScroll > 0 {
-			line = ""
-		}
 		if maxWidth > 0 && len(line) > maxWidth {
 			line = line[:maxWidth]
 		}
 		result = append(result, line)
 	}
 
-	if len(result) > 12 {
-		result = append(result[:12], StyleMessageMeta.Render(fmt.Sprintf("  ... (%d more lines)", len(result)-12)))
+	if len(result) > 3 {
+		result = append(result[:3], StyleMessageMeta.Render(fmt.Sprintf("... (%d more lines)", len(result)-3)))
 	}
 
 	return strings.Join(result, "\n")
