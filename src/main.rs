@@ -97,6 +97,12 @@ fn handle_key(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
 // ---------------------------------------------------------------------------
 
 fn handle_profile_key(app: &mut App, code: KeyCode, _modifiers: KeyModifiers) {
+    // Popups first (theme picker, etc.)
+    if app.popup != Popup::None {
+        handle_popup_key(app, code);
+        return;
+    }
+
     match app.profile_mode {
         ProfileMode::Select => handle_profile_select_key(app, code),
         ProfileMode::Add | ProfileMode::Edit(_) => handle_profile_form_key(app, code),
@@ -132,14 +138,11 @@ fn handle_profile_select_key(app: &mut App, code: KeyCode) {
                 app.profile_form.clear();
                 app.profile_mode = ProfileMode::Add;
             } else if selected == names.len() + 1 {
-                // Cycle theme
-                let theme_names = ui::theme::theme_names();
+                // Open theme picker
+                app.popup = Popup::ThemePicker;
                 let current = app.config.theme.as_deref().unwrap_or("slack");
-                let idx = theme_names.iter().position(|&n| n == current).unwrap_or(0);
-                let next = theme_names[(idx + 1) % theme_names.len()];
-                app.config.theme = Some(next.to_string());
-                app.theme = ui::theme::get_theme(next);
-                let _ = app.config.save(app.config_path.as_deref());
+                let idx = ui::theme::theme_names().iter().position(|&n| n == current).unwrap_or(0);
+                app.popup_list_state.select(Some(idx));
             }
         }
         KeyCode::Char('a') => {
@@ -163,13 +166,10 @@ fn handle_profile_select_key(app: &mut App, code: KeyCode) {
             }
         }
         KeyCode::Char('t') => {
-            let theme_names = ui::theme::theme_names();
+            app.popup = Popup::ThemePicker;
             let current = app.config.theme.as_deref().unwrap_or("slack");
-            let idx = theme_names.iter().position(|&n| n == current).unwrap_or(0);
-            let next = theme_names[(idx + 1) % theme_names.len()];
-            app.config.theme = Some(next.to_string());
-            app.theme = ui::theme::get_theme(next);
-            let _ = app.config.save(app.config_path.as_deref());
+            let idx = ui::theme::theme_names().iter().position(|&n| n == current).unwrap_or(0);
+            app.popup_list_state.select(Some(idx));
         }
         _ => {}
     }
@@ -667,6 +667,44 @@ fn handle_popup_key(app: &mut App, code: KeyCode) {
                             app.loading = true;
                             app.set_status(format!("Switching to vhost: {}", app.selected_namespace), false);
                             app.load_queues();
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        Popup::ThemePicker => {
+            let names = ui::theme::theme_names();
+            match code {
+                KeyCode::Esc => app.popup = Popup::None,
+                KeyCode::Char('j') | KeyCode::Down => {
+                    let i = app.popup_list_state.selected().unwrap_or(0);
+                    if i + 1 < names.len() { app.popup_list_state.select(Some(i + 1)); }
+                    // Live preview
+                    if let Some(sel) = app.popup_list_state.selected() {
+                        if sel < names.len() {
+                            app.theme = ui::theme::get_theme(names[sel]);
+                        }
+                    }
+                }
+                KeyCode::Char('k') | KeyCode::Up => {
+                    let i = app.popup_list_state.selected().unwrap_or(0);
+                    if i > 0 { app.popup_list_state.select(Some(i - 1)); }
+                    // Live preview
+                    if let Some(sel) = app.popup_list_state.selected() {
+                        if sel < names.len() {
+                            app.theme = ui::theme::get_theme(names[sel]);
+                        }
+                    }
+                }
+                KeyCode::Enter => {
+                    if let Some(sel) = app.popup_list_state.selected() {
+                        if sel < names.len() {
+                            let name = names[sel];
+                            app.theme = ui::theme::get_theme(name);
+                            app.config.theme = Some(name.to_string());
+                            let _ = app.config.save(app.config_path.as_deref());
+                            app.popup = Popup::None;
                         }
                     }
                 }

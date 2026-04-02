@@ -9,6 +9,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         Popup::ProfileSwitch => draw_profile_switch(frame, app),
         Popup::NamespacePicker => draw_namespace_picker(frame, app),
         Popup::FetchCount => draw_fetch_count(frame, app),
+        Popup::ThemePicker => draw_theme_picker(frame, app),
         Popup::None => {}
     }
 }
@@ -147,6 +148,46 @@ fn draw_fetch_count(frame: &mut Frame, app: &mut App) {
             Style::default().fg(app.theme.primary)
         };
         ListItem::new(Line::from(Span::styled(label, st)))
+    }).collect();
+
+    let list = List::new(items)
+        .block(block)
+        .highlight_style(
+            Style::default().bg(app.theme.selected_bg).fg(app.theme.white).add_modifier(Modifier::BOLD)
+        )
+        .highlight_symbol("▸ ");
+
+    frame.render_stateful_widget(list, popup_area, &mut app.popup_list_state);
+}
+
+fn draw_theme_picker(frame: &mut Frame, app: &mut App) {
+    use crate::ui::theme::{theme_names, THEMES};
+
+    let popup_area = centered_rect(35, 40, frame.area());
+    frame.render_widget(Clear, popup_area);
+
+    let block = Block::bordered()
+        .title(" Select Theme ")
+        .title_style(Style::default().fg(app.theme.accent).bold())
+        .border_style(Style::default().fg(app.theme.accent))
+        .style(Style::default().bg(app.theme.bg));
+
+    let names = theme_names();
+    let items: Vec<ListItem> = names.iter().enumerate().map(|(i, &name)| {
+        let t = &THEMES[i];
+        let is_current = name == app.theme.name;
+        // Color preview swatches
+        let swatch = Line::from(vec![
+            Span::styled(if is_current { "* " } else { "  " },
+                Style::default().fg(if is_current { app.theme.accent } else { app.theme.primary })),
+            Span::styled(format!("{:<14}", name),
+                Style::default().fg(if is_current { app.theme.accent } else { app.theme.primary }).bold()),
+            Span::styled("■", Style::default().fg(t.accent)),
+            Span::styled("■", Style::default().fg(t.success)),
+            Span::styled("■", Style::default().fg(t.error)),
+            Span::styled("■", Style::default().fg(t.selected_bg)),
+        ]);
+        ListItem::new(swatch)
     }).collect();
 
     let list = List::new(items)

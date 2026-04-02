@@ -35,6 +35,7 @@ pub enum Popup {
     ProfileSwitch,
     NamespacePicker,
     FetchCount,
+    ThemePicker,
 }
 
 pub const FETCH_PRESETS: &[u32] = &[10, 25, 50, 100, 250, 500];

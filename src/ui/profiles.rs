@@ -68,16 +68,29 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     // Footer
     let footer_y = inner.y + inner.height.saturating_sub(1);
     let footer_area = Rect::new(inner.x, footer_y, inner.width, 1);
-    let footer_text = match &app.profile_mode {
-        ProfileMode::Select => "j/k navigate  enter connect  a add  e edit  d delete  t theme  q quit",
-        ProfileMode::ConfirmDelete => "Delete? (y/n)",
-        ProfileMode::Add | ProfileMode::Edit(_) => "tab next  enter save  esc cancel",
+    let ks = Style::default().fg(theme.accent).add_modifier(Modifier::BOLD).bg(theme.bg);
+    let ds = Style::default().fg(theme.muted).bg(theme.bg);
+    let footer_line = match &app.profile_mode {
+        ProfileMode::Select => Line::from(vec![
+            Span::styled("j/k", ks), Span::styled(":nav ", ds),
+            Span::styled("⏎", ks), Span::styled(":connect ", ds),
+            Span::styled("a", ks), Span::styled(":add ", ds),
+            Span::styled("e", ks), Span::styled(":edit ", ds),
+            Span::styled("d", ks), Span::styled(":del ", ds),
+            Span::styled("t", ks), Span::styled(":theme ", ds),
+            Span::styled("q", ks), Span::styled(":quit", ds),
+        ]),
+        ProfileMode::ConfirmDelete => Line::from(vec![
+            Span::styled("Delete? ", ds),
+            Span::styled("y", ks), Span::styled("/", ds), Span::styled("n", ks),
+        ]),
+        ProfileMode::Add | ProfileMode::Edit(_) => Line::from(vec![
+            Span::styled("tab", ks), Span::styled(":next ", ds),
+            Span::styled("⏎", ks), Span::styled(":save ", ds),
+            Span::styled("esc", ks), Span::styled(":cancel", ds),
+        ]),
     };
-    let footer = Paragraph::new(Line::from(Span::styled(
-        footer_text,
-        Style::default().fg(theme.muted).bg(theme.bg),
-    )))
-    .style(Style::default().bg(theme.bg));
+    let footer = Paragraph::new(footer_line).style(Style::default().bg(theme.bg));
     frame.render_widget(footer, footer_area);
 
     // Status message
@@ -91,6 +104,11 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         )))
         .style(Style::default().bg(theme.bg));
         frame.render_widget(status, status_area);
+    }
+
+    // Popups on top
+    if app.popup != crate::app::Popup::None {
+        super::popup::draw(frame, app);
     }
 }
 
