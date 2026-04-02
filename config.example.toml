@@ -1,0 +1,50 @@
+# rabbitpeek configuration
+# Copy this file to ~/.config/rabbitpeek/config.toml
+
+default_profile = "local"
+theme = "slack"  # Options: slack, dracula, gruvbox, catppuccin, tokyo-night
+
+[profiles.local]
+type = "rabbitmq"
+host = "localhost"
+port = 15672
+username = "guest"
+password = "guest"
+vhost = "/"
+tls = false
+
+[profiles.production]
+type = "rabbitmq"
+host = "rabbit.internal.company.com"
+port = 15671
+username = "admin"
+password = "secret"
+vhost = "/app"
+tls = true
+tls_cert = "/path/to/client.crt"
+tls_key  = "/path/to/client.key"
+tls_ca   = "/path/to/ca.crt"
+
+[profiles.cloudamqp]
+type = "rabbitmq"
+host = "crisp-orange-poodle.rmq6.cloudamqp.com"
+port = 443
+username = "myuser"
+password = "mypassword"
+vhost = "dev"
+tls = true
+
+# Coming soon:
+# [profiles.my-kafka]
+# type = "kafka"
+# host = "kafka.example.com"
+# port = 9092
+# username = ""
+# password = ""
+
+# [profiles.my-mqtt]
+# type = "mqtt"
+# host = "mqtt.example.com"
+# port = 1883
+# username = ""
+# password = ""

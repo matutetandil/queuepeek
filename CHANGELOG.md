@@ -1,5 +1,32 @@
 # Changelog
 
+## [0.2.0] - 2026-04-02
+
+### Changed
+- Complete rewrite from Go to Rust using ratatui for precise terminal rendering
+- Wizard-style drill-down flow replacing sidebar layout
+- Backend trait architecture for multi-broker support
+
+### Added
+- Kafka and MQTT backend stubs (coming soon)
+- Profile type field (rabbitmq/kafka/mqtt)
+- Auto-refresh queue list every 5 seconds
+- Message detail screen with headers and scrollable payload
+- JSON and XML auto-detection with pretty-print toggle
+- Clipboard support for copying payload and headers
+- Breadcrumb navigation in all screen headers
+- Queue publish/deliver rates in queue list
+- Message position indicator in detail view
+- Fetch count picker popup with presets
+- Theme picker popup with live preview and color swatches
+- Styled keybinding footers on all screens
+
+### Removed
+- Go implementation (archived then removed)
+- Sidebar/IDE layout (replaced by wizard flow)
+
+---
+
 ## [0.1.0] - 2026-04-01
 
 ### Added

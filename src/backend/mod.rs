@@ -1,4 +1,6 @@
 pub mod rabbitmq;
+pub mod kafka;
+pub mod mqtt;
 
 /// Info about the connected broker
 #[derive(Debug, Clone)]

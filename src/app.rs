@@ -100,8 +100,11 @@ pub struct App {
     pub bg_receiver: mpsc::Receiver<BgResult>,
 }
 
+pub const BACKEND_TYPES: &[&str] = &["rabbitmq", "kafka", "mqtt"];
+
 #[derive(Debug, Clone, Default)]
 pub struct ProfileForm {
+    pub profile_type: String,
     pub name: String,
     pub host: String,
     pub port: String,
@@ -115,80 +118,90 @@ pub struct ProfileForm {
 
 impl ProfileForm {
     pub fn field_count() -> usize {
-        7 // name, host, port, username, password, vhost, tls
+        8 // type, name, host, port, username, password, vhost, tls
     }
 
     pub fn field_label(idx: usize) -> &'static str {
         match idx {
-            0 => "Name",
-            1 => "Host",
-            2 => "Port",
-            3 => "Username",
-            4 => "Password",
-            5 => "Vhost",
-            6 => "TLS",
+            0 => "Type",
+            1 => "Name",
+            2 => "Host",
+            3 => "Port",
+            4 => "Username",
+            5 => "Password",
+            6 => "Vhost",
+            7 => "TLS",
             _ => "",
         }
     }
 
     pub fn field_value(&self, idx: usize) -> String {
         match idx {
-            0 => self.name.clone(),
-            1 => self.host.clone(),
-            2 => self.port.clone(),
-            3 => self.username.clone(),
-            4 => self.password.clone(),
-            5 => self.vhost.clone(),
-            6 => if self.tls { "yes".into() } else { "no".into() },
+            0 => self.profile_type.clone(),
+            1 => self.name.clone(),
+            2 => self.host.clone(),
+            3 => self.port.clone(),
+            4 => self.username.clone(),
+            5 => self.password.clone(),
+            6 => self.vhost.clone(),
+            7 => if self.tls { "yes".into() } else { "no".into() },
             _ => String::new(),
         }
     }
 
     pub fn set_field(&mut self, idx: usize, val: String) {
         match idx {
-            0 => self.name = val,
-            1 => self.host = val,
-            2 => self.port = val,
-            3 => self.username = val,
-            4 => self.password = val,
-            5 => self.vhost = val,
-            6 => self.tls = val == "yes",
+            0 => self.profile_type = val,
+            1 => self.name = val,
+            2 => self.host = val,
+            3 => self.port = val,
+            4 => self.username = val,
+            5 => self.password = val,
+            6 => self.vhost = val,
+            7 => self.tls = val == "yes",
             _ => {}
         }
     }
 
     pub fn push_char(&mut self, c: char) {
-        if self.focused_field == 6 {
-            // Toggle TLS
+        // Toggle fields
+        if self.focused_field == 0 {
+            // Cycle backend type
+            let idx = BACKEND_TYPES.iter().position(|&t| t == self.profile_type).unwrap_or(0);
+            self.profile_type = BACKEND_TYPES[(idx + 1) % BACKEND_TYPES.len()].to_string();
+            return;
+        }
+        if self.focused_field == 7 {
             self.tls = !self.tls;
             return;
         }
         match self.focused_field {
-            0 => self.name.push(c),
-            1 => self.host.push(c),
-            2 => self.port.push(c),
-            3 => self.username.push(c),
-            4 => self.password.push(c),
-            5 => self.vhost.push(c),
+            1 => self.name.push(c),
+            2 => self.host.push(c),
+            3 => self.port.push(c),
+            4 => self.username.push(c),
+            5 => self.password.push(c),
+            6 => self.vhost.push(c),
             _ => {}
         }
     }
 
     pub fn pop_char(&mut self) {
-        if self.focused_field == 6 { return; }
+        if self.focused_field == 0 || self.focused_field == 7 { return; }
         match self.focused_field {
-            0 => { self.name.pop(); }
-            1 => { self.host.pop(); }
-            2 => { self.port.pop(); }
-            3 => { self.username.pop(); }
-            4 => { self.password.pop(); }
-            5 => { self.vhost.pop(); }
+            1 => { self.name.pop(); }
+            2 => { self.host.pop(); }
+            3 => { self.port.pop(); }
+            4 => { self.username.pop(); }
+            5 => { self.password.pop(); }
+            6 => { self.vhost.pop(); }
             _ => {}
         }
     }
 
     pub fn from_profile(name: &str, p: &Profile) -> Self {
         Self {
+            profile_type: p.profile_type.clone(),
             name: name.to_string(),
             host: p.host.clone(),
             port: p.port.to_string(),
@@ -210,9 +223,10 @@ impl ProfileForm {
         let username = if self.username.is_empty() { "guest".into() } else { self.username.clone() };
         let password = if self.password.is_empty() { "guest".into() } else { self.password.clone() };
         let vhost = if self.vhost.is_empty() { "/".into() } else { self.vhost.clone() };
+        let profile_type = if self.profile_type.is_empty() { "rabbitmq".into() } else { self.profile_type.clone() };
 
         Ok(Profile {
-            profile_type: "rabbitmq".into(),
+            profile_type,
             host,
             port,
             username,
@@ -227,6 +241,7 @@ impl ProfileForm {
 
     pub fn clear(&mut self) {
         *self = Self {
+            profile_type: "rabbitmq".into(),
             port: "15672".into(),
             ..Default::default()
         };
@@ -298,14 +313,19 @@ impl App {
             }
         };
 
-        match crate::backend::rabbitmq::RabbitMqBackend::new(&profile) {
+        let backend_result: Result<Box<dyn crate::backend::Backend>, String> = match profile.profile_type.as_str() {
+            "kafka" => crate::backend::kafka::KafkaBackend::new(&profile).map(|b| Box::new(b) as Box<dyn crate::backend::Backend>),
+            "mqtt" => crate::backend::mqtt::MqttBackend::new(&profile).map(|b| Box::new(b) as Box<dyn crate::backend::Backend>),
+            _ => crate::backend::rabbitmq::RabbitMqBackend::new(&profile).map(|b| Box::new(b) as Box<dyn crate::backend::Backend>),
+        };
+
+        match backend_result {
             Ok(backend) => {
-                self.backend = Some(Box::new(backend));
+                self.backend = Some(backend);
                 self.profile_name = name.to_string();
                 self.loading = true;
                 self.set_status("Connecting...", false);
 
-                // Fire background tasks
                 self.load_broker_info();
                 self.load_namespaces();
             }

@@ -130,17 +130,14 @@ fn draw_content(frame: &mut Frame, app: &App, area: Rect) {
     let headers_paragraph = Paragraph::new(header_lines).block(headers_block);
     frame.render_widget(headers_paragraph, content_chunks[0]);
 
-    // Payload block
-    let payload_body = if app.detail_pretty {
-        match serde_json::from_str::<serde_json::Value>(&msg.body) {
-            Ok(val) => serde_json::to_string_pretty(&val).unwrap_or_else(|_| msg.body.clone()),
-            Err(_) => msg.body.clone(),
-        }
+    // Payload block — auto-detect format and pretty-print
+    let (payload_body, format_label) = if app.detail_pretty {
+        pretty_format(&msg.body)
     } else {
-        msg.body.clone()
+        (msg.body.clone(), "raw")
     };
 
-    let pretty_indicator = if app.detail_pretty { "[pretty]" } else { "[raw]" };
+    let pretty_indicator = format!("[{}]", format_label);
 
     let payload_block = Block::bordered()
         .title(format!(" Payload {} ", pretty_indicator))
@@ -181,9 +178,103 @@ fn format_timestamp(ts: i64) -> String {
     format!("{:04}-{:02}-{:02} {:02}:{:02}:{:02} UTC", y, m + 1, d + 1, hours, minutes, seconds)
 }
 
+/// Auto-detect format and pretty-print. Returns (formatted_body, format_label).
+fn pretty_format(body: &str) -> (String, &'static str) {
+    let trimmed = body.trim();
+
+    // Try JSON
+    if trimmed.starts_with('{') || trimmed.starts_with('[') {
+        if let Ok(val) = serde_json::from_str::<serde_json::Value>(trimmed) {
+            if let Ok(pretty) = serde_json::to_string_pretty(&val) {
+                return (pretty, "json");
+            }
+        }
+    }
+
+    // Try XML — simple indent-based formatting
+    if trimmed.starts_with('<') && trimmed.contains('>') {
+        let formatted = pretty_xml(trimmed);
+        if formatted != trimmed {
+            return (formatted, "xml");
+        }
+    }
+
+    // Plain text
+    (body.to_string(), "text")
+}
+
+/// Simple XML indentation formatter
+fn pretty_xml(xml: &str) -> String {
+    let mut result = String::new();
+    let mut indent = 0usize;
+    let mut in_tag = false;
+    let mut tag_content = String::new();
+
+    for ch in xml.chars() {
+        match ch {
+            '<' => {
+                if !tag_content.trim().is_empty() {
+                    result.push_str(&"  ".repeat(indent));
+                    result.push_str(tag_content.trim());
+                    result.push('\n');
+                }
+                tag_content.clear();
+                in_tag = true;
+                tag_content.push(ch);
+            }
+            '>' => {
+                tag_content.push(ch);
+                in_tag = false;
+                let tag = tag_content.trim().to_string();
+
+                if tag.starts_with("</") {
+                    // Closing tag
+                    indent = indent.saturating_sub(1);
+                    result.push_str(&"  ".repeat(indent));
+                    result.push_str(&tag);
+                    result.push('\n');
+                } else if tag.ends_with("/>") || tag.starts_with("<?") || tag.starts_with("<!") {
+                    // Self-closing or processing instruction
+                    result.push_str(&"  ".repeat(indent));
+                    result.push_str(&tag);
+                    result.push('\n');
+                } else {
+                    // Opening tag
+                    result.push_str(&"  ".repeat(indent));
+                    result.push_str(&tag);
+                    result.push('\n');
+                    indent += 1;
+                }
+                tag_content.clear();
+            }
+            _ => {
+                tag_content.push(ch);
+            }
+        }
+    }
+
+    // Remaining content
+    if !tag_content.trim().is_empty() {
+        result.push_str(&"  ".repeat(indent));
+        result.push_str(tag_content.trim());
+        result.push('\n');
+    }
+
+    result
+}
+
 fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
-    let keys = "  j/k:scroll  p:pretty  c:copy payload  h:copy headers  esc:back  q:quit";
-    let bar = Paragraph::new(keys)
-        .style(Style::default().fg(app.theme.muted).bg(app.theme.sidebar_bg));
+    let ks = Style::default().fg(app.theme.accent).bg(app.theme.sidebar_bg);
+    let ds = Style::default().fg(app.theme.muted).bg(app.theme.sidebar_bg);
+    let footer = Line::from(vec![
+        Span::styled("  j/k", ks), Span::styled(":scroll ", ds),
+        Span::styled("p", ks), Span::styled(":pretty ", ds),
+        Span::styled("c", ks), Span::styled(":copy payload ", ds),
+        Span::styled("h", ks), Span::styled(":copy headers ", ds),
+        Span::styled("esc", ks), Span::styled(":back ", ds),
+        Span::styled("q", ks), Span::styled(":quit", ds),
+    ]);
+    let bar = Paragraph::new(footer)
+        .style(Style::default().bg(app.theme.sidebar_bg));
     frame.render_widget(bar, area);
 }
