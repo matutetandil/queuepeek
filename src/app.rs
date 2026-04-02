@@ -28,9 +28,10 @@ pub enum Screen {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Focus {
-    VhostSelector,
-    QueueSelector,
-    Messages,
+    Sidebar,
+    RightHeader,
+    RightTabs,
+    RightContent,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -40,6 +41,25 @@ pub enum Popup {
     ProfileSwitch,
     VhostPicker,
     QueuePicker,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum RightView {
+    Overview,
+    Queues,
+    Exchanges,
+    Policies,
+    Vhosts,
+    Users,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum QueueTab {
+    Overview,
+    Publish,
+    Consume,
+    Routing,
+    Settings,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -68,6 +88,16 @@ pub struct App {
     pub client: Option<RabbitClient>,
     pub profile_name: String,
     pub cluster_name: String,
+
+    // Sidebar
+    pub sidebar_cursor: usize,  // 0=Overview, 1=Queues, 2=Exchanges, 3=Policies, 4=Vhosts, 5=Users
+
+    // Right panel
+    pub right_view: RightView,
+    pub queue_tab: QueueTab,
+
+    // Overview data (stored from BgResult::Overview)
+    pub rabbitmq_version: String,
 
     // Vhosts
     pub vhosts: Vec<String>,
@@ -262,6 +292,10 @@ impl App {
             client: None,
             profile_name: String::new(),
             cluster_name: String::new(),
+            sidebar_cursor: 1, // Start on Queues
+            right_view: RightView::Queues,
+            queue_tab: QueueTab::Consume,
+            rabbitmq_version: String::new(),
             vhosts: Vec::new(),
             selected_vhost: String::new(),
             queues: Vec::new(),
@@ -273,7 +307,7 @@ impl App {
             messages: Vec::new(),
             message_scroll: 0,
             current_queue_name: String::new(),
-            focus: Focus::VhostSelector,
+            focus: Focus::Sidebar,
             popup: Popup::None,
             popup_list_state: ListState::default(),
             picker_filter: String::new(),
@@ -306,7 +340,7 @@ impl App {
                 self.client = Some(client);
                 self.profile_name = name.to_string();
                 self.screen = Screen::Main;
-                self.focus = Focus::VhostSelector;
+                self.focus = Focus::Sidebar;
                 self.loading = true;
                 self.set_status("Connecting...", false);
 
@@ -397,6 +431,7 @@ impl App {
                 }
                 BgResult::Overview(Ok(overview)) => {
                     self.cluster_name = overview.cluster_name;
+                    self.rabbitmq_version = overview.rabbitmq_version;
                 }
                 BgResult::Overview(Err(_)) => {} // silent fail for overview
                 BgResult::Queues { vhost, result } => {
@@ -491,6 +526,34 @@ impl App {
             self.loading = true;
             self.set_status(format!("Loading messages from {}", self.current_queue_name), false);
             self.load_messages();
+        }
+    }
+
+    pub fn sidebar_items() -> &'static [(&'static str, &'static str)] {
+        // (label, section_header) - empty section_header means no header before this item
+        &[
+            ("Overview", "Navigation"),
+            ("Queues", ""),
+            ("Exchanges", ""),
+            ("Policies", ""),
+            ("Virtual Hosts", "Admin"),
+            ("Users", ""),
+        ]
+    }
+
+    pub fn sidebar_item_count() -> usize {
+        6
+    }
+
+    pub fn right_view_for_sidebar(cursor: usize) -> RightView {
+        match cursor {
+            0 => RightView::Overview,
+            1 => RightView::Queues,
+            2 => RightView::Exchanges,
+            3 => RightView::Policies,
+            4 => RightView::Vhosts,
+            5 => RightView::Users,
+            _ => RightView::Queues,
         }
     }
 }

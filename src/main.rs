@@ -11,7 +11,7 @@ use crossterm::execute;
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen};
 use ratatui::prelude::*;
 
-use app::{App, Focus, Popup, ProfileMode, Screen};
+use app::{App, Focus, Popup, ProfileMode, QueueTab, RightView, Screen};
 use config::Config;
 
 fn main() -> io::Result<()> {
@@ -241,7 +241,7 @@ fn handle_main_key(app: &mut App, code: KeyCode, _modifiers: KeyModifiers) {
         return;
     }
 
-    // Global keys (work from any focus)
+    // Global keys
     match code {
         KeyCode::Char('q') => { app.should_quit = true; return; }
         KeyCode::Char('?') => {
@@ -283,20 +283,21 @@ fn handle_main_key(app: &mut App, code: KeyCode, _modifiers: KeyModifiers) {
             app.set_status(format!("Fetch count: {}", app.fetch_count), false);
             return;
         }
-        // Tab cycles: VhostSelector -> QueueSelector -> Messages
         KeyCode::Tab => {
             app.focus = match app.focus {
-                Focus::VhostSelector => Focus::QueueSelector,
-                Focus::QueueSelector => Focus::Messages,
-                Focus::Messages => Focus::VhostSelector,
+                Focus::Sidebar => Focus::RightHeader,
+                Focus::RightHeader => Focus::RightTabs,
+                Focus::RightTabs => Focus::RightContent,
+                Focus::RightContent => Focus::Sidebar,
             };
             return;
         }
         KeyCode::BackTab => {
             app.focus = match app.focus {
-                Focus::VhostSelector => Focus::Messages,
-                Focus::QueueSelector => Focus::VhostSelector,
-                Focus::Messages => Focus::QueueSelector,
+                Focus::Sidebar => Focus::RightContent,
+                Focus::RightHeader => Focus::Sidebar,
+                Focus::RightTabs => Focus::RightHeader,
+                Focus::RightContent => Focus::RightTabs,
             };
             return;
         }
@@ -305,35 +306,81 @@ fn handle_main_key(app: &mut App, code: KeyCode, _modifiers: KeyModifiers) {
 
     // Focus-specific keys
     match app.focus {
-        Focus::VhostSelector => match code {
+        Focus::Sidebar => match code {
+            KeyCode::Char('j') | KeyCode::Down => {
+                if app.sidebar_cursor + 1 < App::sidebar_item_count() {
+                    app.sidebar_cursor += 1;
+                }
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                if app.sidebar_cursor > 0 {
+                    app.sidebar_cursor -= 1;
+                }
+            }
             KeyCode::Enter => {
-                app.popup = Popup::VhostPicker;
-                let idx = app.vhosts.iter().position(|v| v == &app.selected_vhost).unwrap_or(0);
-                app.popup_list_state.select(Some(idx));
+                app.right_view = App::right_view_for_sidebar(app.sidebar_cursor);
+                if app.right_view == RightView::Queues {
+                    app.focus = Focus::RightContent;
+                }
             }
             _ => {}
         },
-        Focus::QueueSelector => match code {
+        Focus::RightHeader => match code {
             KeyCode::Enter => {
-                // Open queue picker popup
-                app.popup = Popup::QueuePicker;
-                app.picker_filter.clear();
-                app.picker_filter_active = false;
-                app.update_filtered_queues();
-                let idx = app.filtered_indices.iter().position(|&i| app.queues[i].name == app.current_queue_name).unwrap_or(0);
-                app.popup_list_state.select(Some(idx));
+                if app.right_view == RightView::Queues {
+                    // Open queue picker popup
+                    app.popup = Popup::QueuePicker;
+                    app.picker_filter.clear();
+                    app.picker_filter_active = false;
+                    app.update_filtered_queues();
+                    let idx = app.filtered_indices.iter()
+                        .position(|&i| app.queues[i].name == app.current_queue_name)
+                        .unwrap_or(0);
+                    app.popup_list_state.select(Some(idx));
+                }
             }
             KeyCode::Char('/') => {
-                // Open queue picker with filter active
-                app.popup = Popup::QueuePicker;
-                app.picker_filter.clear();
-                app.picker_filter_active = true;
-                app.update_filtered_queues();
-                app.popup_list_state.select(Some(0));
+                if app.right_view == RightView::Queues {
+                    app.popup = Popup::QueuePicker;
+                    app.picker_filter.clear();
+                    app.picker_filter_active = true;
+                    app.update_filtered_queues();
+                    app.popup_list_state.select(Some(0));
+                }
             }
             _ => {}
         },
-        Focus::Messages => match code {
+        Focus::RightTabs => {
+            if app.right_view == RightView::Queues {
+                match code {
+                    KeyCode::Char('h') | KeyCode::Left => {
+                        app.queue_tab = match app.queue_tab {
+                            QueueTab::Overview => QueueTab::Settings,
+                            QueueTab::Publish => QueueTab::Overview,
+                            QueueTab::Consume => QueueTab::Publish,
+                            QueueTab::Routing => QueueTab::Consume,
+                            QueueTab::Settings => QueueTab::Routing,
+                        };
+                    }
+                    KeyCode::Char('l') | KeyCode::Right => {
+                        app.queue_tab = match app.queue_tab {
+                            QueueTab::Overview => QueueTab::Publish,
+                            QueueTab::Publish => QueueTab::Consume,
+                            QueueTab::Consume => QueueTab::Routing,
+                            QueueTab::Routing => QueueTab::Settings,
+                            QueueTab::Settings => QueueTab::Overview,
+                        };
+                    }
+                    KeyCode::Char('1') => app.queue_tab = QueueTab::Overview,
+                    KeyCode::Char('2') => app.queue_tab = QueueTab::Publish,
+                    KeyCode::Char('3') => app.queue_tab = QueueTab::Consume,
+                    KeyCode::Char('4') => app.queue_tab = QueueTab::Routing,
+                    KeyCode::Char('5') => app.queue_tab = QueueTab::Settings,
+                    _ => {}
+                }
+            }
+        },
+        Focus::RightContent => match code {
             KeyCode::Char('j') | KeyCode::Down => {
                 app.message_scroll = app.message_scroll.saturating_add(1);
             }
@@ -347,7 +394,6 @@ fn handle_main_key(app: &mut App, code: KeyCode, _modifiers: KeyModifiers) {
                 app.message_scroll = app.message_scroll.saturating_sub(10);
             }
             KeyCode::Char('/') => {
-                // Open queue picker with filter from messages too
                 app.popup = Popup::QueuePicker;
                 app.picker_filter.clear();
                 app.picker_filter_active = true;
@@ -456,7 +502,7 @@ fn handle_popup_key(app: &mut App, code: KeyCode) {
                             app.loading = true;
                             app.set_status(format!("Loading {}", app.current_queue_name), false);
                             app.load_messages();
-                            app.focus = Focus::Messages;
+                            app.focus = Focus::RightContent;
                         }
                     }
                     KeyCode::Down => {
@@ -504,7 +550,7 @@ fn handle_popup_key(app: &mut App, code: KeyCode) {
                             app.loading = true;
                             app.set_status(format!("Loading {}", app.current_queue_name), false);
                             app.load_messages();
-                            app.focus = Focus::Messages;
+                            app.focus = Focus::RightContent;
                         }
                     }
                     _ => {}
