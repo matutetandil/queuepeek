@@ -31,15 +31,21 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
 // ─── Header Bar ───────────────────────────────────────────────────────────
 
 fn draw_header(frame: &mut Frame, app: &App, area: Rect) {
+    let sep = Span::styled(" › ", Style::default().fg(app.theme.divider).bg(app.theme.sidebar_bg));
+    let muted = Style::default().fg(app.theme.muted).bg(app.theme.sidebar_bg);
+
     let line = Line::from(vec![
+        Span::styled(format!("  {} ", app.profile_name), muted),
+        sep.clone(),
+        Span::styled(format!("{} ", app.selected_namespace), muted),
+        sep,
         Span::styled(
-            format!(
-                " Messages — {}  ({} messages, fetch: {})",
-                app.current_queue_name,
-                app.messages.len(),
-                app.fetch_count,
-            ),
-            Style::default().fg(app.theme.white).bold(),
+            format!("{} ", app.current_queue_name),
+            Style::default().fg(app.theme.white).bold().bg(app.theme.sidebar_bg),
+        ),
+        Span::styled(
+            format!("({} msgs, fetch: {})", app.messages.len(), app.fetch_count),
+            muted,
         ),
     ]);
 

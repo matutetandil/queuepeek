@@ -31,19 +31,37 @@ fn draw_header(frame: &mut Frame, app: &App, area: Rect) {
         }
     };
 
-    let text = format!(
-        "  Message #{}  key={}  exchange={}",
-        msg.index,
-        msg.routing_key,
-        if msg.exchange.is_empty() {
-            "(default)"
-        } else {
-            &msg.exchange
-        }
-    );
+    let total = app.messages.len();
+    let position = app.detail_message_idx + 1;
 
-    let bar = Paragraph::new(text)
-        .style(Style::default().fg(app.theme.primary).bg(app.theme.sidebar_bg));
+    let header = Line::from(vec![
+        Span::styled(
+            format!("  {} ", app.profile_name),
+            Style::default().fg(app.theme.muted).bg(app.theme.sidebar_bg),
+        ),
+        Span::styled("› ", Style::default().fg(app.theme.divider).bg(app.theme.sidebar_bg)),
+        Span::styled(
+            format!("{} ", app.selected_namespace),
+            Style::default().fg(app.theme.muted).bg(app.theme.sidebar_bg),
+        ),
+        Span::styled("› ", Style::default().fg(app.theme.divider).bg(app.theme.sidebar_bg)),
+        Span::styled(
+            format!("{} ", app.current_queue_name),
+            Style::default().fg(app.theme.muted).bg(app.theme.sidebar_bg),
+        ),
+        Span::styled("› ", Style::default().fg(app.theme.divider).bg(app.theme.sidebar_bg)),
+        Span::styled(
+            format!("Message #{} ", msg.index),
+            Style::default().fg(app.theme.white).bold().bg(app.theme.sidebar_bg),
+        ),
+        Span::styled(
+            format!("({} of {})", position, total),
+            Style::default().fg(app.theme.muted).bg(app.theme.sidebar_bg),
+        ),
+    ]);
+
+    let bar = Paragraph::new(header)
+        .style(Style::default().bg(app.theme.sidebar_bg));
     frame.render_widget(bar, area);
 }
 

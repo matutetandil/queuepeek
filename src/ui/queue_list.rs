@@ -34,14 +34,19 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
 // ─── Header Bar ───────────────────────────────────────────────────────────
 
 fn draw_header(frame: &mut Frame, app: &App, area: Rect) {
-    let loading_indicator = if app.loading { " ⟳" } else { "" };
-    let queue_count = app.filtered_queue_indices.len();
+    let loading = if app.loading { " ⟳" } else { "" };
+    let count = app.filtered_queue_indices.len();
+    let sep = Span::styled(" › ", Style::default().fg(app.theme.divider).bg(app.theme.sidebar_bg));
+    let muted = Style::default().fg(app.theme.muted).bg(app.theme.sidebar_bg);
 
     let line = Line::from(vec![
+        Span::styled(format!("  {} ", app.profile_name), muted),
+        sep,
         Span::styled(
-            format!(" Queues — {} ({} queues){}", app.selected_namespace, queue_count, loading_indicator),
-            Style::default().fg(app.theme.white).bold(),
+            format!("{} ", app.selected_namespace),
+            Style::default().fg(app.theme.white).bold().bg(app.theme.sidebar_bg),
         ),
+        Span::styled(format!("({} queues){}", count, loading), muted),
     ]);
 
     frame.render_widget(
@@ -132,12 +137,16 @@ fn draw_list(frame: &mut Frame, app: &mut App, area: Rect) {
                 app.theme.accent
             };
 
-            let msg_text = format!("({} msgs)", q.messages);
+            let msg_text = format!("({})", q.messages);
+            let rate_text = if q.publish_rate > 0.0 || q.deliver_rate > 0.0 {
+                format!(" ↑{:.0}/s ↓{:.0}/s", q.publish_rate, q.deliver_rate)
+            } else {
+                String::new()
+            };
             let consumers_text = format!("{}c", q.consumers);
-            let state_text = &q.state;
 
-            // Right side: "  (1234 msgs)  3c  running"
-            let right = format!("  {}  {}  {}", msg_text, consumers_text, state_text);
+            // Right side stats
+            let right = format!("  {}{}  {}  {}", msg_text, rate_text, consumers_text, q.state);
             let right_len = right.len();
 
             // Left side: queue name, truncated if needed
@@ -161,15 +170,19 @@ fn draw_list(frame: &mut Frame, app: &mut App, area: Rect) {
                 ),
                 Span::styled(
                     msg_text,
-                    Style::default().fg(msg_color),
+                    Style::default().fg(msg_color).bold(),
+                ),
+                Span::styled(
+                    rate_text,
+                    Style::default().fg(app.theme.muted),
                 ),
                 Span::styled(
                     format!("  {}", consumers_text),
                     Style::default().fg(app.theme.primary),
                 ),
                 Span::styled(
-                    format!("  {}", state_text),
-                    Style::default().fg(app.theme.muted),
+                    format!("  {}", q.state),
+                    Style::default().fg(if q.state == "running" { app.theme.success } else { app.theme.muted }),
                 ),
             ]);
 
