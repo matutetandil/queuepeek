@@ -3,35 +3,29 @@ use std::sync::mpsc;
 use ratatui::widgets::ListState;
 
 use crate::config::{Config, Profile};
-use crate::rabbit::{Message, Overview, Queue, RabbitClient};
+use crate::backend::{Backend, BrokerInfo, QueueInfo, MessageInfo};
 use crate::ui::theme::{get_theme, Theme};
 
 // Background task results sent via channel
 pub enum BgResult {
-    Vhosts(Result<Vec<String>, String>),
-    Overview(Result<Overview, String>),
+    BrokerInfo(Result<BrokerInfo, String>),
+    Namespaces(Result<Vec<String>, String>),
     Queues {
-        vhost: String,
-        result: Result<Vec<Queue>, String>,
+        namespace: String,
+        result: Result<Vec<QueueInfo>, String>,
     },
     Messages {
         queue_name: String,
-        result: Result<Vec<Message>, String>,
+        result: Result<Vec<MessageInfo>, String>,
     },
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Screen {
     ProfileSelect,
-    Main,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum Focus {
-    Sidebar,
-    RightHeader,
-    RightTabs,
-    RightContent,
+    QueueList,
+    MessageList,
+    MessageDetail,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -39,28 +33,11 @@ pub enum Popup {
     None,
     Help,
     ProfileSwitch,
-    VhostPicker,
-    QueuePicker,
+    NamespacePicker,
+    FetchCount,
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub enum RightView {
-    Overview,
-    Queues,
-    Exchanges,
-    Policies,
-    Vhosts,
-    Users,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum QueueTab {
-    Overview,
-    Publish,
-    Consume,
-    Routing,
-    Settings,
-}
+pub const FETCH_PRESETS: &[u32] = &[10, 25, 50, 100, 250, 500];
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ProfileMode {
@@ -75,63 +52,49 @@ pub struct App {
     pub config_path: Option<String>,
     pub screen: Screen,
     pub should_quit: bool,
-
-    // Theme
     pub theme: &'static Theme,
 
-    // Profile selection
+    // Profile screen
     pub profile_mode: ProfileMode,
     pub profile_list_state: ListState,
     pub profile_form: ProfileForm,
 
-    // Main screen state
-    pub client: Option<RabbitClient>,
+    // Connection
+    pub backend: Option<Box<dyn Backend>>,
     pub profile_name: String,
-    pub cluster_name: String,
+    pub broker_info: Option<BrokerInfo>,
+    pub namespaces: Vec<String>,
+    pub selected_namespace: String,
 
-    // Sidebar
-    pub sidebar_cursor: usize,  // 0=Overview, 1=Queues, 2=Exchanges, 3=Policies, 4=Vhosts, 5=Users
-
-    // Right panel
-    pub right_view: RightView,
-    pub queue_tab: QueueTab,
-
-    // Overview data (stored from BgResult::Overview)
-    pub rabbitmq_version: String,
-
-    // Vhosts
-    pub vhosts: Vec<String>,
-    pub selected_vhost: String,
-
-    // Queues
-    pub queues: Vec<Queue>,
+    // Queue list screen
+    pub queues: Vec<QueueInfo>,
     pub queue_list_state: ListState,
-    pub vhost_list_state: ListState,
     pub queue_filter: String,
     pub queue_filter_active: bool,
-    pub filtered_indices: Vec<usize>,
+    pub filtered_queue_indices: Vec<usize>,
 
-    // Messages
-    pub messages: Vec<Message>,
-    pub message_scroll: u16,
+    // Message list screen
+    pub messages: Vec<MessageInfo>,
+    pub message_list_state: ListState,
     pub current_queue_name: String,
+    pub message_filter: String,
+    pub message_filter_active: bool,
+    pub filtered_message_indices: Vec<usize>,
 
-    // Focus & overlays
-    pub focus: Focus,
-    pub popup: Popup,
-    pub popup_list_state: ListState,
-    pub picker_filter: String,
-    pub picker_filter_active: bool,
+    // Message detail screen
+    pub detail_message_idx: usize,
+    pub detail_scroll: u16,
+    pub detail_pretty: bool,
 
-    // Fetch
+    // Shared
     pub fetch_count: u32,
-
-    // Status
     pub status_message: String,
     pub status_is_error: bool,
     pub loading: bool,
+    pub popup: Popup,
+    pub popup_list_state: ListState,
 
-    // Background task channel
+    // Background channel
     pub bg_sender: mpsc::Sender<BgResult>,
     pub bg_receiver: mpsc::Receiver<BgResult>,
 }
@@ -248,6 +211,7 @@ impl ProfileForm {
         let vhost = if self.vhost.is_empty() { "/".into() } else { self.vhost.clone() };
 
         Ok(Profile {
+            profile_type: "rabbitmq".into(),
             host,
             port,
             username,
@@ -289,33 +253,31 @@ impl App {
             profile_mode: ProfileMode::Select,
             profile_list_state,
             profile_form: ProfileForm { port: "15672".into(), ..Default::default() },
-            client: None,
+            backend: None,
             profile_name: String::new(),
-            cluster_name: String::new(),
-            sidebar_cursor: 1, // Start on Queues
-            right_view: RightView::Queues,
-            queue_tab: QueueTab::Consume,
-            rabbitmq_version: String::new(),
-            vhosts: Vec::new(),
-            selected_vhost: String::new(),
+            broker_info: None,
+            namespaces: Vec::new(),
+            selected_namespace: String::new(),
             queues: Vec::new(),
             queue_list_state: ListState::default(),
-            vhost_list_state: ListState::default(),
             queue_filter: String::new(),
             queue_filter_active: false,
-            filtered_indices: Vec::new(),
+            filtered_queue_indices: Vec::new(),
             messages: Vec::new(),
-            message_scroll: 0,
+            message_list_state: ListState::default(),
             current_queue_name: String::new(),
-            focus: Focus::Sidebar,
-            popup: Popup::None,
-            popup_list_state: ListState::default(),
-            picker_filter: String::new(),
-            picker_filter_active: false,
+            message_filter: String::new(),
+            message_filter_active: false,
+            filtered_message_indices: Vec::new(),
+            detail_message_idx: 0,
+            detail_scroll: 0,
+            detail_pretty: true,
             fetch_count: 50,
             status_message: String::new(),
             status_is_error: false,
             loading: false,
+            popup: Popup::None,
+            popup_list_state: ListState::default(),
             bg_sender: tx,
             bg_receiver: rx,
         }
@@ -335,18 +297,16 @@ impl App {
             }
         };
 
-        match RabbitClient::new(&profile) {
-            Ok(client) => {
-                self.client = Some(client);
+        match crate::backend::rabbitmq::RabbitMqBackend::new(&profile) {
+            Ok(backend) => {
+                self.backend = Some(Box::new(backend));
                 self.profile_name = name.to_string();
-                self.screen = Screen::Main;
-                self.focus = Focus::Sidebar;
                 self.loading = true;
                 self.set_status("Connecting...", false);
 
                 // Fire background tasks
-                self.load_vhosts();
-                self.load_overview();
+                self.load_broker_info();
+                self.load_namespaces();
             }
             Err(e) => {
                 self.set_status(format!("Connection error: {}", e), true);
@@ -354,52 +314,52 @@ impl App {
         }
     }
 
-    pub fn load_vhosts(&self) {
-        if let Some(ref client) = self.client {
-            let client = client.clone_for_thread();
+    pub fn load_broker_info(&self) {
+        if let Some(ref backend) = self.backend {
+            let backend = backend.clone_backend();
             let tx = self.bg_sender.clone();
             std::thread::spawn(move || {
-                let result = client.list_vhosts();
-                let _ = tx.send(BgResult::Vhosts(result));
+                let result = backend.broker_info();
+                let _ = tx.send(BgResult::BrokerInfo(result));
             });
         }
     }
 
-    pub fn load_overview(&self) {
-        if let Some(ref client) = self.client {
-            let client = client.clone_for_thread();
+    pub fn load_namespaces(&self) {
+        if let Some(ref backend) = self.backend {
+            let backend = backend.clone_backend();
             let tx = self.bg_sender.clone();
             std::thread::spawn(move || {
-                let result = client.get_overview();
-                let _ = tx.send(BgResult::Overview(result));
+                let result = backend.list_namespaces();
+                let _ = tx.send(BgResult::Namespaces(result));
             });
         }
     }
 
     pub fn load_queues(&self) {
-        if let Some(ref client) = self.client {
-            let client = client.clone_for_thread();
-            let vhost = self.selected_vhost.clone();
+        if let Some(ref backend) = self.backend {
+            let backend = backend.clone_backend();
+            let namespace = self.selected_namespace.clone();
             let tx = self.bg_sender.clone();
             std::thread::spawn(move || {
-                let result = client.list_queues(&vhost);
-                let _ = tx.send(BgResult::Queues { vhost, result });
+                let result = backend.list_queues(&namespace);
+                let _ = tx.send(BgResult::Queues { namespace, result });
             });
         }
     }
 
     pub fn load_messages(&self) {
-        if let Some(ref client) = self.client {
+        if let Some(ref backend) = self.backend {
             let queue_name = self.current_queue_name.clone();
             if queue_name.is_empty() {
                 return;
             }
-            let client = client.clone_for_thread();
-            let vhost = self.selected_vhost.clone();
+            let backend = backend.clone_backend();
+            let namespace = self.selected_namespace.clone();
             let count = self.fetch_count;
             let tx = self.bg_sender.clone();
             std::thread::spawn(move || {
-                let result = client.peek_messages(&vhost, &queue_name, count);
+                let result = backend.peek_messages(&namespace, &queue_name, count);
                 let _ = tx.send(BgResult::Messages { queue_name, result });
             });
         }
@@ -408,51 +368,78 @@ impl App {
     pub fn process_bg_results(&mut self) {
         while let Ok(result) = self.bg_receiver.try_recv() {
             match result {
-                BgResult::Vhosts(Ok(vhosts)) => {
-                    self.vhosts = vhosts;
-                    // Select default vhost
-                    if let Some(ref client) = self.client {
-                        let default = client.default_vhost().to_string();
-                        if self.vhosts.contains(&default) {
-                            self.selected_vhost = default;
-                        } else if let Some(first) = self.vhosts.first() {
-                            self.selected_vhost = first.clone();
-                        }
+                BgResult::BrokerInfo(Ok(info)) => {
+                    self.broker_info = Some(info);
+                }
+                BgResult::BrokerInfo(Err(_)) => {
+                    // Silent fail for broker info
+                }
+                BgResult::Namespaces(Ok(ns)) => {
+                    self.namespaces = ns;
+
+                    // Try to find the profile's configured vhost in namespaces
+                    let profile_vhost = self.config.profiles.get(&self.profile_name)
+                        .and_then(|p| p.vhost.clone())
+                        .unwrap_or_else(|| "/".into());
+
+                    let default_ns = if self.namespaces.contains(&profile_vhost) {
+                        profile_vhost
+                    } else {
+                        self.namespaces.first().cloned().unwrap_or_default()
+                    };
+
+                    if self.namespaces.len() == 1 {
+                        self.selected_namespace = self.namespaces[0].clone();
+                        self.screen = Screen::QueueList;
+                        self.loading = true;
+                        self.load_queues();
+                    } else if self.namespaces.is_empty() {
+                        self.loading = false;
+                        self.set_status("No namespaces available", true);
+                    } else {
+                        // Multiple namespaces: move to QueueList and show picker popup
+                        self.selected_namespace = default_ns.clone();
+                        self.screen = Screen::QueueList;
+                        self.popup = Popup::NamespacePicker;
+                        let idx = self.namespaces.iter()
+                            .position(|n| n == &default_ns)
+                            .unwrap_or(0);
+                        self.popup_list_state.select(Some(idx));
+                        self.loading = true;
+                        self.load_queues();
                     }
-                    // Set vhost list selection
-                    let vhost_idx = self.vhosts.iter().position(|v| v == &self.selected_vhost).unwrap_or(0);
-                    self.vhost_list_state.select(Some(vhost_idx));
-                    self.set_status(format!("{} vhosts available", self.vhosts.len()), false);
-                    self.load_queues();
                 }
-                BgResult::Vhosts(Err(e)) => {
+                BgResult::Namespaces(Err(e)) => {
                     self.loading = false;
-                    self.set_status(format!("Error: {}", e), true);
+                    self.set_status(format!("Error loading namespaces: {}", e), true);
                 }
-                BgResult::Overview(Ok(overview)) => {
-                    self.cluster_name = overview.cluster_name;
-                    self.rabbitmq_version = overview.rabbitmq_version;
-                }
-                BgResult::Overview(Err(_)) => {} // silent fail for overview
-                BgResult::Queues { vhost, result } => {
-                    if vhost != self.selected_vhost {
-                        return; // stale result
+                BgResult::Queues { namespace, result } => {
+                    if namespace != self.selected_namespace {
+                        continue; // stale result
                     }
                     match result {
                         Ok(queues) => {
+                            // Preserve current selection if the queue still exists
+                            let previously_selected = self.selected_queue()
+                                .map(|q| q.name.clone());
+
                             self.set_status(format!("{} queues loaded", queues.len()), false);
                             self.queues = queues;
                             self.update_filtered_queues();
-                            if !self.filtered_indices.is_empty() {
+
+                            // Try to restore selection
+                            if let Some(prev_name) = previously_selected {
+                                let restored = self.filtered_queue_indices.iter()
+                                    .position(|&idx| self.queues[idx].name == prev_name);
+                                if let Some(pos) = restored {
+                                    self.queue_list_state.select(Some(pos));
+                                } else if !self.filtered_queue_indices.is_empty() {
+                                    self.queue_list_state.select(Some(0));
+                                }
+                            } else if !self.filtered_queue_indices.is_empty() {
                                 self.queue_list_state.select(Some(0));
-                                // Auto-select first queue
-                                let idx = self.filtered_indices[0];
-                                self.current_queue_name = self.queues[idx].name.clone();
-                                self.loading = true;
-                                self.load_messages();
-                            } else {
-                                self.loading = false;
                             }
+                            self.loading = false;
                         }
                         Err(e) => {
                             self.loading = false;
@@ -461,12 +448,21 @@ impl App {
                     }
                 }
                 BgResult::Messages { queue_name, result } => {
+                    if queue_name != self.current_queue_name {
+                        continue; // stale result
+                    }
                     self.loading = false;
                     match result {
                         Ok(messages) => {
-                            self.set_status(format!("{} messages from {}", messages.len(), queue_name), false);
+                            self.set_status(
+                                format!("{} messages from {}", messages.len(), queue_name),
+                                false,
+                            );
                             self.messages = messages;
-                            self.message_scroll = 0;
+                            self.update_filtered_messages();
+                            if !self.filtered_message_indices.is_empty() {
+                                self.message_list_state.select(Some(0));
+                            }
                         }
                         Err(e) => {
                             self.set_status(format!("Error: {}", e), true);
@@ -478,82 +474,36 @@ impl App {
     }
 
     pub fn update_filtered_queues(&mut self) {
-        // Use picker_filter when picker popup is open, otherwise queue_filter
-        let filter = if self.popup == Popup::QueuePicker {
-            self.picker_filter.to_lowercase()
-        } else {
-            self.queue_filter.to_lowercase()
-        };
-        self.filtered_indices = self.queues.iter().enumerate()
+        let filter = self.queue_filter.to_lowercase();
+        self.filtered_queue_indices = self.queues.iter().enumerate()
             .filter(|(_, q)| {
-                if filter.is_empty() {
-                    true
-                } else {
-                    q.name.to_lowercase().contains(&filter)
-                }
+                filter.is_empty() || q.name.to_lowercase().contains(&filter)
             })
             .map(|(i, _)| i)
             .collect();
     }
 
-    pub fn selected_queue(&self) -> Option<&Queue> {
+    pub fn update_filtered_messages(&mut self) {
+        let filter = self.message_filter.to_lowercase();
+        self.filtered_message_indices = self.messages.iter().enumerate()
+            .filter(|(_, m)| {
+                filter.is_empty()
+                    || m.body.to_lowercase().contains(&filter)
+                    || m.routing_key.to_lowercase().contains(&filter)
+            })
+            .map(|(i, _)| i)
+            .collect();
+    }
+
+    pub fn selected_queue(&self) -> Option<&QueueInfo> {
         let selected = self.queue_list_state.selected()?;
-        let idx = *self.filtered_indices.get(selected)?;
+        let idx = *self.filtered_queue_indices.get(selected)?;
         self.queues.get(idx)
     }
 
-    pub fn cycle_vhost(&mut self) {
-        if self.vhosts.len() <= 1 {
-            return;
-        }
-        let current_idx = self.vhosts.iter().position(|v| v == &self.selected_vhost).unwrap_or(0);
-        let next_idx = (current_idx + 1) % self.vhosts.len();
-        self.selected_vhost = self.vhosts[next_idx].clone();
-        self.queues.clear();
-        self.filtered_indices.clear();
-        self.messages.clear();
-        self.queue_filter.clear();
-        self.current_queue_name.clear();
-        self.queue_list_state.select(None);
-        self.loading = true;
-        self.set_status(format!("Switching to vhost: {}", self.selected_vhost), false);
-        self.load_queues();
-    }
-
-    pub fn select_queue(&mut self) {
-        if let Some(q) = self.selected_queue() {
-            self.current_queue_name = q.name.clone();
-            self.loading = true;
-            self.set_status(format!("Loading messages from {}", self.current_queue_name), false);
-            self.load_messages();
-        }
-    }
-
-    pub fn sidebar_items() -> &'static [(&'static str, &'static str)] {
-        // (label, section_header) - empty section_header means no header before this item
-        &[
-            ("Overview", "Navigation"),
-            ("Queues", ""),
-            ("Exchanges", ""),
-            ("Policies", ""),
-            ("Virtual Hosts", "Admin"),
-            ("Users", ""),
-        ]
-    }
-
-    pub fn sidebar_item_count() -> usize {
-        6
-    }
-
-    pub fn right_view_for_sidebar(cursor: usize) -> RightView {
-        match cursor {
-            0 => RightView::Overview,
-            1 => RightView::Queues,
-            2 => RightView::Exchanges,
-            3 => RightView::Policies,
-            4 => RightView::Vhosts,
-            5 => RightView::Users,
-            _ => RightView::Queues,
-        }
+    pub fn selected_message(&self) -> Option<&MessageInfo> {
+        let selected = self.message_list_state.selected()?;
+        let idx = *self.filtered_message_indices.get(selected)?;
+        self.messages.get(idx)
     }
 }

@@ -3,8 +3,12 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 
+fn default_profile_type() -> String { "rabbitmq".into() }
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Profile {
+    #[serde(default = "default_profile_type", rename = "type")]
+    pub profile_type: String,
     pub host: String,
     pub port: u16,
     pub username: String,

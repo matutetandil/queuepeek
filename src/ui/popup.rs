@@ -7,8 +7,8 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     match &app.popup {
         Popup::Help => draw_help(frame, app),
         Popup::ProfileSwitch => draw_profile_switch(frame, app),
-        Popup::VhostPicker => draw_vhost_picker(frame, app),
-        Popup::QueuePicker => draw_queue_picker(frame, app),
+        Popup::NamespacePicker => draw_namespace_picker(frame, app),
+        Popup::FetchCount => draw_fetch_count(frame, app),
         Popup::None => {}
     }
 }
@@ -38,15 +38,17 @@ fn draw_help(frame: &mut Frame, app: &App) {
         .style(Style::default().bg(app.theme.bg));
 
     let shortcuts = vec![
-        ("tab/S-tab", "Cycle focus forward/back"),
-        ("enter", "Open picker / peek messages"),
-        ("/", "Filter queues (from queue selector)"),
-        ("j/k ↑/↓", "Navigate lists / scroll messages"),
-        ("r", "Reload messages"),
-        ("R", "Reload queues"),
-        ("v", "Quick switch vhost"),
+        ("j/k ↑/↓", "Navigate lists"),
+        ("enter", "Select / open detail"),
+        ("/", "Filter"),
+        ("r", "Reload"),
+        ("v", "Switch vhost/namespace"),
         ("p", "Switch profile"),
         ("+/-", "Adjust fetch count"),
+        ("c", "Copy payload (detail)"),
+        ("h", "Copy headers (detail)"),
+        ("P", "Toggle pretty (detail)"),
+        ("esc", "Go back"),
         ("?", "Toggle help"),
         ("q", "Quit"),
     ];
@@ -94,19 +96,19 @@ fn draw_profile_switch(frame: &mut Frame, app: &mut App) {
     frame.render_stateful_widget(list, popup_area, &mut app.popup_list_state);
 }
 
-fn draw_vhost_picker(frame: &mut Frame, app: &mut App) {
+fn draw_namespace_picker(frame: &mut Frame, app: &mut App) {
     let popup_area = centered_rect(40, 50, frame.area());
     frame.render_widget(Clear, popup_area);
 
     let block = Block::bordered()
-        .title(" Select Vhost ")
+        .title(" Select Namespace ")
         .title_style(Style::default().fg(app.theme.accent).bold())
         .border_style(Style::default().fg(app.theme.accent))
         .style(Style::default().bg(app.theme.bg));
 
-    let items: Vec<ListItem> = app.vhosts.iter().map(|v| {
-        let is_current = v == &app.selected_vhost;
-        let display = if is_current { format!("* {}", v) } else { format!("  {}", v) };
+    let items: Vec<ListItem> = app.namespaces.iter().map(|ns| {
+        let is_current = ns == &app.selected_namespace;
+        let display = if is_current { format!("* {}", ns) } else { format!("  {}", ns) };
         let style = if is_current { Style::default().fg(app.theme.accent) } else { Style::default().fg(app.theme.primary) };
         ListItem::new(Line::from(Span::styled(display, style)))
     }).collect();
@@ -120,60 +122,39 @@ fn draw_vhost_picker(frame: &mut Frame, app: &mut App) {
     frame.render_stateful_widget(list, popup_area, &mut app.popup_list_state);
 }
 
-fn draw_queue_picker(frame: &mut Frame, app: &mut App) {
-    let popup_area = centered_rect(60, 70, frame.area());
+fn draw_fetch_count(frame: &mut Frame, app: &mut App) {
+    use crate::app::FETCH_PRESETS;
+
+    let popup_area = centered_rect(30, 40, frame.area());
     frame.render_widget(Clear, popup_area);
 
-    // Title with filter
-    let title = if app.picker_filter_active {
-        format!(" Select Queue [/{}▎] ", app.picker_filter)
-    } else if !app.picker_filter.is_empty() {
-        format!(" Select Queue [/{}] ", app.picker_filter)
-    } else {
-        " Select Queue [/ to filter] ".to_string()
-    };
-
     let block = Block::bordered()
-        .title(title)
+        .title(" Fetch Count ")
         .title_style(Style::default().fg(app.theme.accent).bold())
         .border_style(Style::default().fg(app.theme.accent))
         .style(Style::default().bg(app.theme.bg));
 
-    let items: Vec<ListItem> = app.filtered_indices.iter().map(|&idx| {
-        let queue = &app.queues[idx];
-        let is_current = queue.name == app.current_queue_name;
-
-        let count_style = if queue.messages > 1000 {
-            Style::default().fg(app.theme.error).bold()
-        } else if queue.messages == 0 {
-            Style::default().fg(app.theme.success)
+    let items: Vec<ListItem> = FETCH_PRESETS.iter().map(|&count| {
+        let is_current = count == app.fetch_count;
+        let label = if is_current {
+            format!("* {} messages", count)
         } else {
-            Style::default().fg(app.theme.accent)
+            format!("  {} messages", count)
         };
-
-        let name_style = if is_current {
+        let st = if is_current {
             Style::default().fg(app.theme.accent).bold()
         } else {
             Style::default().fg(app.theme.primary)
         };
-
-        ListItem::new(Line::from(vec![
-            Span::styled(if is_current { "* " } else { "  " }, name_style),
-            Span::styled(&queue.name, name_style),
-            Span::styled(" ", Style::default()),
-            Span::styled(format!("({})", queue.messages), count_style),
-            Span::styled(
-                format!("  {} consumers", queue.consumers),
-                Style::default().fg(app.theme.muted),
-            ),
-        ]))
+        ListItem::new(Line::from(Span::styled(label, st)))
     }).collect();
 
     let list = List::new(items)
         .block(block)
-        .highlight_style(Style::default().bg(app.theme.selected_bg).fg(app.theme.white).add_modifier(Modifier::BOLD))
-        .highlight_symbol("▸ ")
-        .style(Style::default().bg(app.theme.bg));
+        .highlight_style(
+            Style::default().bg(app.theme.selected_bg).fg(app.theme.white).add_modifier(Modifier::BOLD)
+        )
+        .highlight_symbol("▸ ");
 
     frame.render_stateful_widget(list, popup_area, &mut app.popup_list_state);
 }
