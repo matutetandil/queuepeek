@@ -84,11 +84,18 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
             Span::styled("Delete? ", ds),
             Span::styled("y", ks), Span::styled("/", ds), Span::styled("n", ks),
         ]),
-        ProfileMode::Add | ProfileMode::Edit(_) => Line::from(vec![
-            Span::styled("tab", ks), Span::styled(":next ", ds),
-            Span::styled("⏎", ks), Span::styled(":save ", ds),
-            Span::styled("esc", ks), Span::styled(":cancel", ds),
-        ]),
+        ProfileMode::Add | ProfileMode::Edit(_) => {
+            let enter_hint = match app.profile_form.focused_field {
+                0 => ":select type ",
+                7 => ":toggle ",
+                _ => ":save ",
+            };
+            Line::from(vec![
+                Span::styled("tab", ks), Span::styled(":next ", ds),
+                Span::styled("⏎", ks), Span::styled(enter_hint, ds),
+                Span::styled("esc", ks), Span::styled(":cancel", ds),
+            ])
+        }
     };
     let footer = Paragraph::new(footer_line).style(Style::default().bg(theme.bg));
     frame.render_widget(footer, footer_area);

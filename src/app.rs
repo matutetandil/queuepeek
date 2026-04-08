@@ -243,7 +243,7 @@ impl ProfileForm {
             port: p.port.to_string(),
             username: p.username.clone(),
             password: p.password.clone(),
-            vhost: p.vhost.clone().unwrap_or_else(|| "/".into()),
+            vhost: p.vhost.clone().unwrap_or_default(),
             tls: p.tls.unwrap_or(false),
             focused_field: 0,
             error: String::new(),
@@ -258,7 +258,7 @@ impl ProfileForm {
         let host = if self.host.is_empty() { "localhost".into() } else { self.host.clone() };
         let username = if self.username.is_empty() { "guest".into() } else { self.username.clone() };
         let password = if self.password.is_empty() { "guest".into() } else { self.password.clone() };
-        let vhost = if self.vhost.is_empty() { "/".into() } else { self.vhost.clone() };
+        let vhost = if self.vhost.is_empty() { None } else { Some(self.vhost.clone()) };
         let profile_type = if self.profile_type.is_empty() { "rabbitmq".into() } else { self.profile_type.clone() };
 
         Ok(Profile {
@@ -267,7 +267,7 @@ impl ProfileForm {
             port,
             username,
             password,
-            vhost: Some(vhost),
+            vhost,
             tls: Some(self.tls),
             tls_cert: None,
             tls_key: None,
@@ -436,27 +436,34 @@ impl App {
                 BgResult::Namespaces(Ok(ns)) => {
                     self.namespaces = ns;
 
-                    // Try to find the profile's configured vhost in namespaces
-                    let profile_vhost = self.config.profiles.get(&self.profile_name)
-                        .and_then(|p| p.vhost.clone())
-                        .unwrap_or_else(|| "/".into());
+                    // Check if profile has an explicit vhost configured
+                    let configured_vhost = self.config.profiles.get(&self.profile_name)
+                        .and_then(|p| p.vhost.as_ref())
+                        .filter(|v| !v.is_empty());
 
-                    let default_ns = if self.namespaces.contains(&profile_vhost) {
-                        profile_vhost
-                    } else {
-                        self.namespaces.first().cloned().unwrap_or_default()
-                    };
-
-                    if self.namespaces.len() == 1 {
+                    if self.namespaces.is_empty() {
+                        self.loading = false;
+                        self.set_status("No namespaces available", true);
+                    } else if self.namespaces.len() == 1 {
+                        // Single namespace — use it directly
                         self.selected_namespace = self.namespaces[0].clone();
                         self.screen = Screen::QueueList;
                         self.loading = true;
                         self.load_queues();
-                    } else if self.namespaces.is_empty() {
-                        self.loading = false;
-                        self.set_status("No namespaces available", true);
+                    } else if let Some(vhost) = configured_vhost {
+                        // Explicit vhost configured — use it directly, no picker
+                        let ns = if self.namespaces.contains(vhost) {
+                            vhost.clone()
+                        } else {
+                            self.namespaces.first().cloned().unwrap_or_default()
+                        };
+                        self.selected_namespace = ns;
+                        self.screen = Screen::QueueList;
+                        self.loading = true;
+                        self.load_queues();
                     } else {
-                        // Multiple namespaces: move to QueueList and show picker popup
+                        // No vhost configured + multiple namespaces — show picker
+                        let default_ns = self.namespaces.first().cloned().unwrap_or_default();
                         self.selected_namespace = default_ns.clone();
                         self.screen = Screen::QueueList;
                         self.popup = Popup::NamespacePicker;
