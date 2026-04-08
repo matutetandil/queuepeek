@@ -163,12 +163,25 @@ impl ProfileForm {
         }
     }
 
+    pub fn default_port(backend_type: &str) -> &'static str {
+        match backend_type {
+            "kafka" => "9092",
+            "mqtt" => "1883",
+            _ => "15672",
+        }
+    }
+
     pub fn push_char(&mut self, c: char) {
         // Toggle fields
         if self.focused_field == 0 {
             // Cycle backend type
             let idx = BACKEND_TYPES.iter().position(|&t| t == self.profile_type).unwrap_or(0);
+            let old_default = Self::default_port(&self.profile_type);
             self.profile_type = BACKEND_TYPES[(idx + 1) % BACKEND_TYPES.len()].to_string();
+            // Auto-update port if it was the default for the old type
+            if self.port == old_default || self.port.is_empty() {
+                self.port = Self::default_port(&self.profile_type).to_string();
+            }
             return;
         }
         if self.focused_field == 7 {
@@ -236,13 +249,15 @@ impl ProfileForm {
             tls_cert: None,
             tls_key: None,
             tls_ca: None,
+            topics: None,
         })
     }
 
     pub fn clear(&mut self) {
+        let default_type = "rabbitmq";
         *self = Self {
-            profile_type: "rabbitmq".into(),
-            port: "15672".into(),
+            profile_type: default_type.into(),
+            port: Self::default_port(default_type).into(),
             ..Default::default()
         };
     }
@@ -268,7 +283,7 @@ impl App {
             theme,
             profile_mode: ProfileMode::Select,
             profile_list_state,
-            profile_form: ProfileForm { port: "15672".into(), ..Default::default() },
+            profile_form: ProfileForm { profile_type: "rabbitmq".into(), port: "15672".into(), ..Default::default() },
             backend: None,
             profile_name: String::new(),
             broker_info: None,

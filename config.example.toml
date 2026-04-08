@@ -1,5 +1,5 @@
-# rabbitpeek configuration
-# Copy this file to ~/.config/rabbitpeek/config.toml
+# queuepeek configuration
+# Copy this file to ~/.config/queuepeek/config.toml
 
 default_profile = "local"
 theme = "slack"  # Options: slack, dracula, gruvbox, catppuccin, tokyo-night
@@ -34,17 +34,35 @@ password = "mypassword"
 vhost = "dev"
 tls = true
 
-# Coming soon:
-# [profiles.my-kafka]
-# type = "kafka"
-# host = "kafka.example.com"
-# port = 9092
-# username = ""
-# password = ""
+[profiles.my-kafka]
+type = "kafka"
+host = "kafka.example.com"
+port = 9092
+username = "admin"
+password = "secret"
 
-# [profiles.my-mqtt]
-# type = "mqtt"
-# host = "mqtt.example.com"
-# port = 1883
-# username = ""
-# password = ""
+[profiles.my-kafka-tls]
+type = "kafka"
+host = "kafka.example.com"
+port = 9093
+username = "admin"
+password = "secret"
+tls = true
+tls_ca = "/path/to/ca.crt"
+
+[profiles.my-mqtt]
+type = "mqtt"
+host = "mqtt.example.com"
+port = 1883
+username = ""
+password = ""
+topics = ["sensors/#", "devices/status"]
+
+[profiles.my-mqtt-tls]
+type = "mqtt"
+host = "mqtt.example.com"
+port = 8883
+username = "admin"
+password = "secret"
+tls = true
+tls_ca = "/path/to/ca.crt"

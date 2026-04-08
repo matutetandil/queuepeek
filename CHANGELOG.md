@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.3.0] - 2026-04-08
+
+### Changed
+- Renamed project from rabbitpeek to queuepeek
+- Config path changed from `~/.config/rabbitpeek/` to `~/.config/queuepeek/`
+- Default port auto-updates when switching backend type in profile form (RabbitMQ: 15672, Kafka: 9092, MQTT: 1883)
+
+### Added
+- Kafka backend implementation using rdkafka (librdkafka)
+  - Topic listing via cluster metadata with message count from watermarks
+  - Message consumption using ephemeral consumer groups (no auto-commit)
+  - SASL/SSL authentication support
+  - Kafka message headers, keys, partition, and offset displayed
+- MQTT backend implementation using rumqttc
+  - Topic discovery via wildcard `#` subscription (3-second scan)
+  - Pre-configured topic list support via `topics` field in profile config
+  - Message reading via topic subscription
+  - TLS support with CA and client certificates
+  - Note: MQTT consumes messages on read (no non-destructive peek)
+- `topics` field in profile configuration for MQTT pre-configured topic monitoring
+
+---
+
 ## [0.2.0] - 2026-04-02
 
 ### Changed

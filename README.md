@@ -1,17 +1,15 @@
-# rabbitpeek
+# queuepeek
 
 A terminal UI for inspecting message queues, built with Rust and ratatui.
 
 ## Overview
 
-rabbitpeek connects to message broker management APIs and lets you browse queues and read messages without consuming them. The interface follows a wizard-style drill-down flow: select a profile, pick a queue, browse messages, and inspect individual message detail — all from the terminal.
-
-Messages are peeked using `ack_requeue_true`, so the queue state is never modified.
+queuepeek connects to message broker management APIs and lets you browse queues/topics and read messages from the terminal. The interface follows a wizard-style drill-down flow: select a profile, pick a queue, browse messages, and inspect individual message detail.
 
 ## Features
 
 - Wizard-style drill-down navigation: Profiles -> Queues -> Messages -> Message Detail
-- Non-destructive message peek — messages are never acknowledged or removed
+- Multi-broker support: RabbitMQ, Kafka, and MQTT
 - JSON and XML auto-detection with pretty-print toggle
 - Clipboard support for copying payload and headers
 - 5 built-in color themes with live preview picker
@@ -31,42 +29,46 @@ Messages are peeked using `ack_requeue_true`, so the queue state is never modifi
 
 ## Supported Backends
 
-| Backend  | Status         |
-|----------|----------------|
-| RabbitMQ | Full support   |
-| Kafka    | Coming soon    |
-| MQTT     | Coming soon    |
+| Backend  | Status       | Notes                                                    |
+|----------|--------------|----------------------------------------------------------|
+| RabbitMQ | Full support | Management HTTP API, non-destructive peek (ack_requeue)  |
+| Kafka    | Full support | Topic listing via metadata, consumer-based message fetch |
+| MQTT     | Full support | Wildcard topic discovery, subscription-based reading     |
 
-RabbitMQ uses the Management HTTP API. Kafka and MQTT backends are stubbed and will be implemented in future releases.
+### Backend Details
+
+**RabbitMQ** uses the Management HTTP API. Messages are peeked using `ack_requeue_true`, so the queue state is never modified.
+
+**Kafka** connects via the native protocol using `librdkafka`. Topics are discovered from cluster metadata, and messages are consumed from tail offsets using ephemeral consumer groups with auto-commit disabled.
+
+**MQTT** connects via the MQTT protocol. Topics are discovered by subscribing to the wildcard topic `#`, or you can pre-configure specific topics in your profile. Note: MQTT subscriptions consume messages — there is no non-destructive peek. A warning is displayed in the UI.
 
 ## Prerequisites
 
 - Rust 1.70 or newer
-- RabbitMQ with the Management Plugin enabled:
-  ```bash
-  rabbitmq-plugins enable rabbitmq_management
-  ```
+- CMake (for building the bundled librdkafka used by the Kafka backend)
+- For RabbitMQ: Management Plugin enabled (`rabbitmq-plugins enable rabbitmq_management`)
 
 ## Installation
 
 Install with Cargo:
 
 ```bash
-cargo install rabbitpeek
+cargo install queuepeek
 ```
 
 Or build from source:
 
 ```bash
-git clone https://github.com/matutedenda/rabbitpeek.git
-cd rabbitpeek
+git clone https://github.com/matutedenda/queuepeek.git
+cd queuepeek
 cargo build --release
-./target/release/rabbitpeek
+./target/release/queuepeek
 ```
 
 ## Configuration
 
-rabbitpeek reads its configuration from `~/.config/rabbitpeek/config.toml`.
+queuepeek reads its configuration from `~/.config/queuepeek/config.toml`.
 
 ```toml
 default_profile = "local"
@@ -91,27 +93,50 @@ tls      = true
 tls_cert = "/path/to/client.crt"
 tls_key  = "/path/to/client.key"
 tls_ca   = "/path/to/ca.crt"
+
+[profiles.my-kafka]
+type     = "kafka"
+host     = "kafka.example.com"
+port     = 9092
+username = "admin"
+password = "secret"
+
+[profiles.my-mqtt]
+type     = "mqtt"
+host     = "mqtt.example.com"
+port     = 1883
+username = ""
+password = ""
+topics   = ["sensors/#", "devices/status"]
 ```
 
 Each `[profiles.<name>]` block defines a named environment. The `type` field determines which backend is used (`rabbitmq`, `kafka`, or `mqtt`). The `default_profile` key sets which profile is selected on startup.
 
+### MQTT Topics
+
+For MQTT profiles, you can optionally specify a `topics` array to pre-configure which topics to monitor. If omitted, queuepeek subscribes to the wildcard topic `#` and discovers topics automatically (limited to a 3-second discovery window).
+
 ### TLS
 
-Set `tls = true` to use HTTPS when connecting to the Management API. Provide `tls_cert`, `tls_key`, and `tls_ca` paths for mutual TLS with a client certificate.
+Set `tls = true` to enable TLS. Provide `tls_cert`, `tls_key`, and `tls_ca` paths for mutual TLS with a client certificate.
+
+- **RabbitMQ**: Uses HTTPS for the Management API
+- **Kafka**: Uses SASL_SSL with PLAIN mechanism
+- **MQTT**: Uses mqtts:// (MQTT over TLS)
 
 ## Usage
 
 Start the application:
 
 ```bash
-rabbitpeek
+queuepeek
 ```
 
 The wizard flow proceeds through four screens:
 
 1. **Profile selection** — Choose a saved profile or create a new one.
-2. **Queue list** — Browse queues for the active vhost. Queues auto-refresh every 5 seconds. Filter by name with `/`.
-3. **Message list** — Browse fetched messages for the selected queue. Filter messages with `/`.
+2. **Queue list** — Browse queues/topics for the active namespace. Queues auto-refresh every 5 seconds. Filter by name with `/`.
+3. **Message list** — Browse fetched messages for the selected queue/topic. Filter messages with `/`.
 4. **Message detail** — View full message payload, headers, and metadata. Toggle pretty-print, copy to clipboard, scroll through the payload.
 
 Press `Esc` or `Backspace` at any screen to go back one level.
@@ -174,8 +199,9 @@ Press `Esc` or `Backspace` at any screen to go back one level.
 
 - [ratatui](https://github.com/ratatui-org/ratatui) — Terminal UI rendering
 - [crossterm](https://github.com/crossterm-rs/crossterm) — Cross-platform terminal control
-- [tokio](https://github.com/tokio-rs/tokio) — Async runtime
-- [reqwest](https://github.com/seanmonstar/reqwest) — HTTP client for Management API
+- [reqwest](https://github.com/seanmonstar/reqwest) — HTTP client for RabbitMQ Management API
+- [rdkafka](https://github.com/fede1024/rust-rdkafka) — Kafka client (librdkafka wrapper)
+- [rumqttc](https://github.com/bytebeamio/rumqtt) — MQTT client
 - [serde / toml](https://github.com/toml-rs/toml) — Configuration parsing
 - [arboard](https://github.com/1Password/arboard) — Clipboard support
 

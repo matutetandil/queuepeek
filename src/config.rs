@@ -23,6 +23,8 @@ pub struct Profile {
     pub tls_key: Option<String>,
     #[serde(default)]
     pub tls_ca: Option<String>,
+    #[serde(default)]
+    pub topics: Option<Vec<String>>,
 }
 
 impl Profile {
@@ -53,7 +55,7 @@ pub struct Config {
 
 impl Config {
     pub fn config_path() -> Option<PathBuf> {
-        dirs::config_dir().map(|d| d.join("rabbitpeek").join("config.toml"))
+        dirs::config_dir().map(|d| d.join("queuepeek").join("config.toml"))
     }
 
     pub fn load(path: Option<&str>) -> Self {

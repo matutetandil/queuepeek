@@ -1,8 +1,8 @@
 [package]
-name = "rabbitpeek"
-version = "0.1.0"
+name = "queuepeek"
+version = "0.3.0"
 edition = "2021"
-description = "A TUI RabbitMQ queue inspector"
+description = "A TUI multi-broker message queue inspector"
 
 [dependencies]
 ratatui = "0.29"
@@ -15,3 +15,6 @@ dirs = "6"
 tui-input = "0.11"
 urlencoding = "2"
 arboard = "3"
+rdkafka = { version = "0.36", features = ["cmake-build"] }
+rumqttc = "0.24"
+uuid = { version = "1", features = ["v4"] }
