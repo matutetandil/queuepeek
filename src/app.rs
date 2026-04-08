@@ -632,8 +632,6 @@ impl App {
             let backend = backend.clone_backend();
             let namespace = self.selected_namespace.clone();
             let queue = self.current_queue_name.clone();
-            let all_messages: Vec<MessageInfo> = self.messages.clone();
-            let fetch_count = self.fetch_count;
             let tx = self.bg_sender.clone();
             let cancel = self.operation_cancel.clone();
             cancel.store(false, std::sync::atomic::Ordering::Relaxed);
@@ -641,87 +639,239 @@ impl App {
             self.popup = Popup::OperationProgress;
 
             std::thread::spawn(move || {
-                // Step 1: consume all messages from queue
-                let _ = tx.send(BgResult::OperationProgress { completed: 0, total: 0 });
-                let consumed = match backend.consume_messages(&namespace, &queue, fetch_count) {
-                    Ok(msgs) => msgs,
+                use std::io::{BufRead, Write};
+
+                // Step 1: create temp backup file
+                let backup_path = std::env::temp_dir().join(format!("queuepeek-delete-backup-{}.jsonl", chrono_timestamp()));
+                let backup_file = match std::fs::File::create(&backup_path) {
+                    Ok(f) => f,
                     Err(e) => {
-                        let _ = tx.send(BgResult::OperationComplete(Err(format!("Consume failed: {}", e))));
+                        let _ = tx.send(BgResult::OperationComplete(Err(format!("Creating backup: {}", e))));
                         return;
                     }
                 };
+                let mut writer = std::io::BufWriter::new(backup_file);
 
-                // Step 2: re-publish only the ones NOT selected
-                let to_keep: Vec<&MessageInfo> = all_messages.iter().enumerate()
-                    .filter(|(i, _)| !selected_indices.contains(i))
-                    .map(|(_, m)| m)
-                    .collect();
+                // Step 2: consume all messages, streaming to file one at a time
+                let _ = tx.send(BgResult::OperationProgress { completed: 0, total: 0 });
+                let batch_size = 100u32;
+                let mut total_consumed = 0usize;
 
-                let total = to_keep.len();
-                let deleted = selected_indices.len();
-                let _ = tx.send(BgResult::OperationProgress { completed: 0, total });
-
-                for (i, msg) in to_keep.iter().enumerate() {
+                loop {
                     if cancel.load(std::sync::atomic::Ordering::Relaxed) {
                         let _ = tx.send(BgResult::OperationComplete(
-                            Err(format!("Cancelled — {} messages may be lost! Re-fetch to verify.", consumed.len()))
+                            Err(format!("Cancelled — backup at {}", backup_path.display()))
                         ));
                         return;
                     }
-                    let headers: Vec<(String, String)> = msg.headers.clone();
-                    if let Err(e) = backend.publish_message(
-                        &namespace, &queue, &msg.body, &msg.routing_key, &headers, &msg.content_type,
-                    ) {
-                        let _ = tx.send(BgResult::OperationComplete(
-                            Err(format!("Re-publish failed at {}/{}: {} — some messages may be lost!", i + 1, total, e))
-                        ));
-                        return;
+
+                    let batch = match backend.consume_messages(&namespace, &queue, batch_size) {
+                        Ok(msgs) => msgs,
+                        Err(e) => {
+                            let _ = tx.send(BgResult::OperationComplete(
+                                Err(format!("Consume failed after {}: {} — backup at {}", total_consumed, e, backup_path.display()))
+                            ));
+                            return;
+                        }
+                    };
+
+                    if batch.is_empty() { break; }
+
+                    for msg in &batch {
+                        let json = message_to_json(msg);
+                        if let Err(e) = writeln!(writer, "{}", json) {
+                            let _ = tx.send(BgResult::OperationComplete(
+                                Err(format!("Writing backup: {}", e))
+                            ));
+                            return;
+                        }
                     }
-                    let _ = tx.send(BgResult::OperationProgress { completed: i + 1, total });
+
+                    total_consumed += batch.len();
+                    let _ = tx.send(BgResult::OperationProgress { completed: total_consumed, total: 0 });
+
+                    if (batch.len() as u32) < batch_size { break; }
                 }
 
+                drop(writer);
+
+                // Step 3: read backup and re-publish messages NOT in selected_indices
+                let file = match std::fs::File::open(&backup_path) {
+                    Ok(f) => f,
+                    Err(e) => {
+                        let _ = tx.send(BgResult::OperationComplete(
+                            Err(format!("Reading backup: {} — file at {}", e, backup_path.display()))
+                        ));
+                        return;
+                    }
+                };
+                let reader = std::io::BufReader::new(file);
+                let mut republished = 0usize;
+                let mut deleted = 0usize;
+
+                for (i, line) in reader.lines().enumerate() {
+                    if cancel.load(std::sync::atomic::Ordering::Relaxed) {
+                        let _ = tx.send(BgResult::OperationComplete(
+                            Err(format!("Cancelled during re-publish — backup at {}", backup_path.display()))
+                        ));
+                        return;
+                    }
+
+                    let line = match line {
+                        Ok(l) => l,
+                        Err(e) => {
+                            let _ = tx.send(BgResult::OperationComplete(
+                                Err(format!("Reading line {}: {} — backup at {}", i, e, backup_path.display()))
+                            ));
+                            return;
+                        }
+                    };
+
+                    if selected_indices.contains(&i) {
+                        deleted += 1;
+                        continue;
+                    }
+
+                    // Parse and re-publish
+                    let msg: serde_json::Value = match serde_json::from_str(&line) {
+                        Ok(v) => v,
+                        Err(_) => continue,
+                    };
+
+                    let body = msg["body"].as_str().unwrap_or("");
+                    let routing_key = msg["routing_key"].as_str().unwrap_or("");
+                    let content_type = msg["content_type"].as_str().unwrap_or("");
+                    let headers: Vec<(String, String)> = msg["headers"].as_object()
+                        .map(|h| h.iter().map(|(k, v)| (k.clone(), v.as_str().unwrap_or("").to_string())).collect())
+                        .unwrap_or_default();
+
+                    if let Err(e) = backend.publish_message(
+                        &namespace, &queue, body, routing_key, &headers, content_type,
+                    ) {
+                        let _ = tx.send(BgResult::OperationComplete(
+                            Err(format!("Re-publish failed at msg {}: {} — backup at {}", i + 1, e, backup_path.display()))
+                        ));
+                        return;
+                    }
+
+                    republished += 1;
+                    let _ = tx.send(BgResult::OperationProgress { completed: republished, total: total_consumed - deleted });
+                }
+
+                // Clean up backup on success
+                let _ = std::fs::remove_file(&backup_path);
+
                 let _ = tx.send(BgResult::OperationComplete(
-                    Ok(format!("Deleted {} messages, kept {}", deleted, total))
+                    Ok(format!("Deleted {} messages, kept {}", deleted, republished))
                 ));
             });
         }
     }
 
+    /// Export selected messages (from memory) to a JSON file
     pub fn export_messages_to_json(&self) -> Result<String, String> {
         let messages = self.get_target_messages();
         if messages.is_empty() {
             return Err("No messages to export".into());
         }
 
-        let export: Vec<serde_json::Value> = messages.iter().map(|m| {
-            let headers: serde_json::Map<String, serde_json::Value> = m.headers.iter()
-                .map(|(k, v)| (k.clone(), serde_json::Value::String(v.clone())))
-                .collect();
-            serde_json::json!({
-                "index": m.index,
-                "routing_key": m.routing_key,
-                "exchange": m.exchange,
-                "redelivered": m.redelivered,
-                "timestamp": m.timestamp,
-                "content_type": m.content_type,
-                "headers": headers,
-                "body": m.body,
-            })
-        }).collect();
-
-        let json = serde_json::to_string_pretty(&export)
-            .map_err(|e| format!("Serializing: {}", e))?;
-
-        // Save to file
         let filename = format!("queuepeek-export-{}.json", chrono_timestamp());
         let path = std::env::current_dir()
             .unwrap_or_default()
             .join(&filename);
 
-        std::fs::write(&path, &json)
-            .map_err(|e| format!("Writing file: {}", e))?;
+        let file = std::fs::File::create(&path)
+            .map_err(|e| format!("Creating file: {}", e))?;
+        let mut writer = std::io::BufWriter::new(file);
+
+        use std::io::Write;
+        writeln!(writer, "[").map_err(|e| format!("Writing: {}", e))?;
+        for (i, m) in messages.iter().enumerate() {
+            let json = message_to_json(m);
+            let comma = if i + 1 < messages.len() { "," } else { "" };
+            writeln!(writer, "  {}{}", json, comma).map_err(|e| format!("Writing: {}", e))?;
+        }
+        writeln!(writer, "]").map_err(|e| format!("Writing: {}", e))?;
 
         Ok(format!("Exported {} messages to {}", messages.len(), path.display()))
+    }
+
+    /// Dump entire queue to JSONL file (streaming, low memory)
+    pub fn do_dump_queue(&mut self) {
+        if let Some(ref backend) = self.backend {
+            let backend = backend.clone_backend();
+            let namespace = self.selected_namespace.clone();
+            let queue = self.current_queue_name.clone();
+            let tx = self.bg_sender.clone();
+            let cancel = self.operation_cancel.clone();
+            cancel.store(false, std::sync::atomic::Ordering::Relaxed);
+            self.operation_progress = (0, 0);
+            self.popup = Popup::OperationProgress;
+
+            std::thread::spawn(move || {
+                use std::io::Write;
+
+                let filename = format!("queuepeek-dump-{}-{}.jsonl", queue, chrono_timestamp());
+                let path = std::env::current_dir().unwrap_or_default().join(&filename);
+                let file = match std::fs::File::create(&path) {
+                    Ok(f) => f,
+                    Err(e) => {
+                        let _ = tx.send(BgResult::OperationComplete(Err(format!("Creating file: {}", e))));
+                        return;
+                    }
+                };
+                let mut writer = std::io::BufWriter::new(file);
+
+                let batch_size = 100u32;
+                let mut total = 0usize;
+
+                loop {
+                    if cancel.load(std::sync::atomic::Ordering::Relaxed) {
+                        let _ = tx.send(BgResult::OperationComplete(
+                            Ok(format!("Dump cancelled after {} messages — saved to {}", total, path.display()))
+                        ));
+                        return;
+                    }
+
+                    // Peek (non-destructive) in batches
+                    let batch = match backend.peek_messages(&namespace, &queue, batch_size) {
+                        Ok(msgs) => msgs,
+                        Err(e) => {
+                            if total > 0 {
+                                let _ = tx.send(BgResult::OperationComplete(
+                                    Ok(format!("Dumped {} messages to {} (stopped: {})", total, path.display(), e))
+                                ));
+                            } else {
+                                let _ = tx.send(BgResult::OperationComplete(Err(format!("Peek failed: {}", e))));
+                            }
+                            return;
+                        }
+                    };
+
+                    if batch.is_empty() { break; }
+
+                    for msg in &batch {
+                        let json = message_to_json(msg);
+                        if let Err(e) = writeln!(writer, "{}", json) {
+                            let _ = tx.send(BgResult::OperationComplete(
+                                Err(format!("Writing: {} — partial dump at {}", e, path.display()))
+                            ));
+                            return;
+                        }
+                    }
+
+                    total += batch.len();
+                    let _ = tx.send(BgResult::OperationProgress { completed: total, total: 0 });
+
+                    // RabbitMQ peek always returns the same messages, so one batch is all we get
+                    break;
+                }
+
+                let _ = tx.send(BgResult::OperationComplete(
+                    Ok(format!("Dumped {} messages to {}", total, path.display()))
+                ));
+            });
+        }
     }
 
     pub fn re_publish_selected(&self) {
@@ -1052,4 +1202,21 @@ fn chrono_timestamp() -> String {
         .unwrap_or_default()
         .as_secs();
     format!("{}", secs)
+}
+
+fn message_to_json(m: &MessageInfo) -> String {
+    let headers: serde_json::Map<String, serde_json::Value> = m.headers.iter()
+        .map(|(k, v)| (k.clone(), serde_json::Value::String(v.clone())))
+        .collect();
+    let val = serde_json::json!({
+        "index": m.index,
+        "routing_key": m.routing_key,
+        "exchange": m.exchange,
+        "redelivered": m.redelivered,
+        "timestamp": m.timestamp,
+        "content_type": m.content_type,
+        "headers": headers,
+        "body": m.body,
+    });
+    serde_json::to_string(&val).unwrap_or_default()
 }

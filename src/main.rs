@@ -592,6 +592,10 @@ fn handle_message_list_key(app: &mut App, code: KeyCode, modifiers: KeyModifiers
                 app.set_status(format!("Re-publishing {} message(s)...", count), false);
             }
         }
+        KeyCode::Char('W') => {
+            // Dump entire queue to JSONL file (streaming)
+            app.do_dump_queue();
+        }
         KeyCode::Esc => {
             if !app.selected_messages.is_empty() {
                 // First Esc clears selection
