@@ -535,11 +535,73 @@ fn handle_message_list_key(app: &mut App, code: KeyCode, modifiers: KeyModifiers
             app.publish_form = app::PublishForm::new_for_queue(&app.current_queue_name);
             app.popup = Popup::PublishMessage;
         }
+        KeyCode::Char(' ') => {
+            // Toggle selection on current message
+            app.toggle_message_selection();
+            // Move down after selecting
+            let len = app.filtered_message_indices.len();
+            if len > 0 {
+                let i = app.message_list_state.selected().unwrap_or(0);
+                if i + 1 < len {
+                    app.message_list_state.select(Some(i + 1));
+                }
+            }
+        }
+        KeyCode::Char('a') => {
+            // Select/deselect all
+            app.select_all_messages();
+        }
+        KeyCode::Char('C') => {
+            // Copy selected messages to another queue
+            if app.selection_count() > 0 {
+                app.queue_picker_filter.clear();
+                app.queue_picker_filter_active = false;
+                app.popup = Popup::MessageQueuePicker(app::QueueOperation::Copy);
+                app.popup_list_state.select(Some(0));
+            }
+        }
+        KeyCode::Char('M') => {
+            // Move selected messages to another queue (via delete+publish)
+            if app.selection_count() > 0 {
+                app.queue_picker_filter.clear();
+                app.queue_picker_filter_active = false;
+                app.popup = Popup::MessageQueuePicker(app::QueueOperation::Move);
+                app.popup_list_state.select(Some(0));
+            }
+        }
+        KeyCode::Char('D') => {
+            // Delete selected messages
+            if app.selection_count() > 0 {
+                app.popup = Popup::ConfirmDeleteMessages;
+            }
+        }
+        KeyCode::Char('e') => {
+            // Export selected messages to JSON
+            if app.selection_count() > 0 {
+                match app.export_messages_to_json() {
+                    Ok(msg) => app.set_status(msg, false),
+                    Err(e) => app.set_status(e, true),
+                }
+            }
+        }
+        KeyCode::Char('R') => {
+            // Re-publish selected messages
+            if app.selection_count() > 0 {
+                let count = app.selection_count();
+                app.re_publish_selected();
+                app.set_status(format!("Re-publishing {} message(s)...", count), false);
+            }
+        }
         KeyCode::Esc => {
-            app.screen = Screen::QueueList;
-            app.messages.clear();
-            app.message_filter.clear();
-            app.message_filter_active = false;
+            if !app.selected_messages.is_empty() {
+                // First Esc clears selection
+                app.selected_messages.clear();
+            } else {
+                app.screen = Screen::QueueList;
+                app.messages.clear();
+                app.message_filter.clear();
+                app.message_filter_active = false;
+            }
         }
         _ => {}
     }
@@ -942,6 +1004,95 @@ fn handle_popup_key(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
                     _ => {}
                 }
             }
+        }
+        Popup::MessageQueuePicker(_) => {
+            let filtered: Vec<usize> = app.queues.iter().enumerate()
+                .filter(|(_, q)| {
+                    app.queue_picker_filter.is_empty()
+                        || q.name.to_lowercase().contains(&app.queue_picker_filter.to_lowercase())
+                })
+                .map(|(i, _)| i)
+                .collect();
+            let len = filtered.len();
+
+            if app.queue_picker_filter_active {
+                match code {
+                    KeyCode::Char(c) => {
+                        app.queue_picker_filter.push(c);
+                        app.popup_list_state.select(Some(0));
+                    }
+                    KeyCode::Backspace => {
+                        app.queue_picker_filter.pop();
+                        app.popup_list_state.select(Some(0));
+                    }
+                    KeyCode::Esc => {
+                        app.queue_picker_filter.clear();
+                        app.queue_picker_filter_active = false;
+                    }
+                    KeyCode::Enter => {
+                        app.queue_picker_filter_active = false;
+                    }
+                    _ => {}
+                }
+            } else {
+                match code {
+                    KeyCode::Esc => {
+                        app.popup = Popup::None;
+                        app.queue_picker_filter.clear();
+                    }
+                    KeyCode::Char('/') => {
+                        app.queue_picker_filter_active = true;
+                    }
+                    KeyCode::Char('j') | KeyCode::Down => {
+                        let i = app.popup_list_state.selected().unwrap_or(0);
+                        if i + 1 < len { app.popup_list_state.select(Some(i + 1)); }
+                    }
+                    KeyCode::Char('k') | KeyCode::Up => {
+                        let i = app.popup_list_state.selected().unwrap_or(0);
+                        if i > 0 { app.popup_list_state.select(Some(i - 1)); }
+                    }
+                    KeyCode::Enter => {
+                        let selected = app.popup_list_state.selected().unwrap_or(0);
+                        if selected < len {
+                            let dest_idx = filtered[selected];
+                            let dest_name = app.queues[dest_idx].name.clone();
+
+                            if let Popup::MessageQueuePicker(ref op) = app.popup.clone() {
+                                let op = op.clone();
+                                app.popup = Popup::None;
+                                app.queue_picker_filter.clear();
+
+                                match op {
+                                    app::QueueOperation::Copy => {
+                                        app.do_copy_selected_to(&dest_name);
+                                    }
+                                    app::QueueOperation::Move => {
+                                        // Move = copy selected to dest + delete selected from source
+                                        app.do_copy_selected_to(&dest_name);
+                                        // After copy completes, user can delete from source
+                                        // (full atomic move requires consume-all which is too risky for selected)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        Popup::ConfirmDeleteMessages => {
+            match code {
+                KeyCode::Char('y') | KeyCode::Char('Y') => {
+                    app.popup = Popup::None;
+                    app.do_delete_selected();
+                }
+                _ => {
+                    app.popup = Popup::None;
+                }
+            }
+        }
+        Popup::ExportMessages => {
+            app.popup = Popup::None;
         }
         Popup::OperationProgress => {
             if code == KeyCode::Esc {

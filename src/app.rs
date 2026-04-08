@@ -1,4 +1,6 @@
+use std::collections::HashSet;
 use std::sync::mpsc;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use ratatui::widgets::ListState;
 
@@ -47,7 +49,10 @@ pub enum Popup {
     ConfirmPurge,
     ConfirmDelete,
     QueuePicker(QueueOperation),
+    MessageQueuePicker(QueueOperation),
     OperationProgress,
+    ConfirmDeleteMessages,
+    ExportMessages,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -99,6 +104,9 @@ pub struct App {
     pub message_filter: String,
     pub message_filter_active: bool,
     pub filtered_message_indices: Vec<usize>,
+
+    // Message selection (multi-select)
+    pub selected_messages: HashSet<usize>,
 
     // Message detail screen
     pub detail_message_idx: usize,
@@ -410,6 +418,7 @@ impl App {
             message_filter: String::new(),
             message_filter_active: false,
             filtered_message_indices: Vec::new(),
+            selected_messages: HashSet::new(),
             detail_message_idx: 0,
             detail_scroll: 0,
             detail_pretty: true,
@@ -513,6 +522,231 @@ impl App {
             std::thread::spawn(move || {
                 let result = backend.peek_messages(&namespace, &queue_name, count);
                 let _ = tx.send(BgResult::Messages { queue_name, result });
+            });
+        }
+    }
+
+    pub fn get_target_messages(&self) -> Vec<MessageInfo> {
+        if self.selected_messages.is_empty() {
+            // If nothing selected, use the currently highlighted message
+            if let Some(selected) = self.message_list_state.selected() {
+                if let Some(&idx) = self.filtered_message_indices.get(selected) {
+                    if let Some(msg) = self.messages.get(idx) {
+                        return vec![msg.clone()];
+                    }
+                }
+            }
+            Vec::new()
+        } else {
+            self.selected_messages.iter()
+                .filter_map(|&idx| self.messages.get(idx).cloned())
+                .collect()
+        }
+    }
+
+    pub fn selection_count(&self) -> usize {
+        if self.selected_messages.is_empty() {
+            if self.message_list_state.selected().is_some() { 1 } else { 0 }
+        } else {
+            self.selected_messages.len()
+        }
+    }
+
+    pub fn toggle_message_selection(&mut self) {
+        if let Some(selected) = self.message_list_state.selected() {
+            if let Some(&idx) = self.filtered_message_indices.get(selected) {
+                if self.selected_messages.contains(&idx) {
+                    self.selected_messages.remove(&idx);
+                } else {
+                    self.selected_messages.insert(idx);
+                }
+            }
+        }
+    }
+
+    pub fn select_all_messages(&mut self) {
+        if self.selected_messages.len() == self.filtered_message_indices.len() {
+            self.selected_messages.clear();
+        } else {
+            self.selected_messages = self.filtered_message_indices.iter().copied().collect();
+        }
+    }
+
+    pub fn do_copy_selected_to(&mut self, dest: &str) {
+        if let Some(ref backend) = self.backend {
+            let messages = self.get_target_messages();
+            if messages.is_empty() { return; }
+
+            let backend = backend.clone_backend();
+            let namespace = self.selected_namespace.clone();
+            let dest = dest.to_string();
+            let tx = self.bg_sender.clone();
+            let cancel = self.operation_cancel.clone();
+            cancel.store(false, std::sync::atomic::Ordering::Relaxed);
+            self.operation_progress = (0, 0);
+            self.popup = Popup::OperationProgress;
+
+            std::thread::spawn(move || {
+                let total = messages.len();
+                let _ = tx.send(BgResult::OperationProgress { completed: 0, total });
+
+                for (i, msg) in messages.iter().enumerate() {
+                    if cancel.load(std::sync::atomic::Ordering::Relaxed) {
+                        let _ = tx.send(BgResult::OperationComplete(
+                            Ok(format!("Cancelled after {}/{} messages", i, total))
+                        ));
+                        return;
+                    }
+                    let headers: Vec<(String, String)> = msg.headers.clone();
+                    if let Err(e) = backend.publish_message(
+                        &namespace, &dest, &msg.body, &msg.routing_key, &headers, &msg.content_type,
+                    ) {
+                        let _ = tx.send(BgResult::OperationComplete(
+                            Err(format!("Failed at message {}/{}: {}", i + 1, total, e))
+                        ));
+                        return;
+                    }
+                    let _ = tx.send(BgResult::OperationProgress { completed: i + 1, total });
+                }
+                let _ = tx.send(BgResult::OperationComplete(
+                    Ok(format!("Copied {} messages to {}", total, dest))
+                ));
+            });
+        }
+    }
+
+    pub fn do_delete_selected(&mut self) {
+        if let Some(ref backend) = self.backend {
+            let selected_indices: HashSet<usize> = if self.selected_messages.is_empty() {
+                if let Some(sel) = self.message_list_state.selected() {
+                    if let Some(&idx) = self.filtered_message_indices.get(sel) {
+                        let mut s = HashSet::new();
+                        s.insert(idx);
+                        s
+                    } else { return; }
+                } else { return; }
+            } else {
+                self.selected_messages.clone()
+            };
+
+            let backend = backend.clone_backend();
+            let namespace = self.selected_namespace.clone();
+            let queue = self.current_queue_name.clone();
+            let all_messages: Vec<MessageInfo> = self.messages.clone();
+            let fetch_count = self.fetch_count;
+            let tx = self.bg_sender.clone();
+            let cancel = self.operation_cancel.clone();
+            cancel.store(false, std::sync::atomic::Ordering::Relaxed);
+            self.operation_progress = (0, 0);
+            self.popup = Popup::OperationProgress;
+
+            std::thread::spawn(move || {
+                // Step 1: consume all messages from queue
+                let _ = tx.send(BgResult::OperationProgress { completed: 0, total: 0 });
+                let consumed = match backend.consume_messages(&namespace, &queue, fetch_count) {
+                    Ok(msgs) => msgs,
+                    Err(e) => {
+                        let _ = tx.send(BgResult::OperationComplete(Err(format!("Consume failed: {}", e))));
+                        return;
+                    }
+                };
+
+                // Step 2: re-publish only the ones NOT selected
+                let to_keep: Vec<&MessageInfo> = all_messages.iter().enumerate()
+                    .filter(|(i, _)| !selected_indices.contains(i))
+                    .map(|(_, m)| m)
+                    .collect();
+
+                let total = to_keep.len();
+                let deleted = selected_indices.len();
+                let _ = tx.send(BgResult::OperationProgress { completed: 0, total });
+
+                for (i, msg) in to_keep.iter().enumerate() {
+                    if cancel.load(std::sync::atomic::Ordering::Relaxed) {
+                        let _ = tx.send(BgResult::OperationComplete(
+                            Err(format!("Cancelled — {} messages may be lost! Re-fetch to verify.", consumed.len()))
+                        ));
+                        return;
+                    }
+                    let headers: Vec<(String, String)> = msg.headers.clone();
+                    if let Err(e) = backend.publish_message(
+                        &namespace, &queue, &msg.body, &msg.routing_key, &headers, &msg.content_type,
+                    ) {
+                        let _ = tx.send(BgResult::OperationComplete(
+                            Err(format!("Re-publish failed at {}/{}: {} — some messages may be lost!", i + 1, total, e))
+                        ));
+                        return;
+                    }
+                    let _ = tx.send(BgResult::OperationProgress { completed: i + 1, total });
+                }
+
+                let _ = tx.send(BgResult::OperationComplete(
+                    Ok(format!("Deleted {} messages, kept {}", deleted, total))
+                ));
+            });
+        }
+    }
+
+    pub fn export_messages_to_json(&self) -> Result<String, String> {
+        let messages = self.get_target_messages();
+        if messages.is_empty() {
+            return Err("No messages to export".into());
+        }
+
+        let export: Vec<serde_json::Value> = messages.iter().map(|m| {
+            let headers: serde_json::Map<String, serde_json::Value> = m.headers.iter()
+                .map(|(k, v)| (k.clone(), serde_json::Value::String(v.clone())))
+                .collect();
+            serde_json::json!({
+                "index": m.index,
+                "routing_key": m.routing_key,
+                "exchange": m.exchange,
+                "redelivered": m.redelivered,
+                "timestamp": m.timestamp,
+                "content_type": m.content_type,
+                "headers": headers,
+                "body": m.body,
+            })
+        }).collect();
+
+        let json = serde_json::to_string_pretty(&export)
+            .map_err(|e| format!("Serializing: {}", e))?;
+
+        // Save to file
+        let filename = format!("queuepeek-export-{}.json", chrono_timestamp());
+        let path = std::env::current_dir()
+            .unwrap_or_default()
+            .join(&filename);
+
+        std::fs::write(&path, &json)
+            .map_err(|e| format!("Writing file: {}", e))?;
+
+        Ok(format!("Exported {} messages to {}", messages.len(), path.display()))
+    }
+
+    pub fn re_publish_selected(&self) {
+        if let Some(ref backend) = self.backend {
+            let messages = self.get_target_messages();
+            if messages.is_empty() { return; }
+
+            let backend = backend.clone_backend();
+            let namespace = self.selected_namespace.clone();
+            let queue = self.current_queue_name.clone();
+            let tx = self.bg_sender.clone();
+
+            std::thread::spawn(move || {
+                let mut ok = 0;
+                for msg in &messages {
+                    let headers: Vec<(String, String)> = msg.headers.clone();
+                    if backend.publish_message(
+                        &namespace, &queue, &msg.body, &msg.routing_key, &headers, &msg.content_type,
+                    ).is_ok() {
+                        ok += 1;
+                    }
+                }
+                let _ = tx.send(BgResult::Published(
+                    Ok(())
+                ));
             });
         }
     }
@@ -722,6 +956,7 @@ impl App {
                                 false,
                             );
                             self.messages = messages;
+                            self.selected_messages.clear();
                             self.update_filtered_messages();
                             if !self.filtered_message_indices.is_empty() {
                                 self.message_list_state.select(Some(0));
@@ -809,4 +1044,12 @@ impl App {
         let idx = *self.filtered_message_indices.get(selected)?;
         self.messages.get(idx)
     }
+}
+
+fn chrono_timestamp() -> String {
+    let secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    format!("{}", secs)
 }

@@ -47,6 +47,14 @@ fn draw_header(frame: &mut Frame, app: &App, area: Rect) {
             format!("({} msgs, fetch: {})", app.messages.len(), app.fetch_count),
             muted,
         ),
+        if !app.selected_messages.is_empty() {
+            Span::styled(
+                format!("  [{} selected]", app.selected_messages.len()),
+                Style::default().fg(app.theme.success).bold().bg(app.theme.sidebar_bg),
+            )
+        } else {
+            Span::raw("")
+        },
     ]);
 
     frame.render_widget(
@@ -102,16 +110,25 @@ fn draw_list(frame: &mut Frame, app: &mut App, area: Rect) {
         .iter()
         .map(|&idx| {
             let msg = &app.messages[idx];
+            let is_selected = app.selected_messages.contains(&idx);
 
             let ts = msg
                 .timestamp
                 .map(format_timestamp)
                 .unwrap_or_else(|| "no timestamp".into());
 
-            // Line 1: #N  timestamp  key=routing_key  exchange=exchange
+            let checkbox = if is_selected { "☑ " } else { "☐ " };
+            let cb_style = if is_selected {
+                Style::default().fg(app.theme.success).bold()
+            } else {
+                Style::default().fg(app.theme.muted)
+            };
+
+            // Line 1: [x] #N  timestamp  key=routing_key  exchange=exchange
             let line1 = Line::from(vec![
+                Span::styled(checkbox, cb_style),
                 Span::styled(
-                    format!("  #{}", msg.index),
+                    format!("#{}", msg.index),
                     Style::default().fg(app.theme.accent).bold(),
                 ),
                 Span::styled("  ", Style::default()),
@@ -184,23 +201,33 @@ fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
         ("", app.theme.muted)
     };
 
+    let sel_count = app.selected_messages.len();
+    let sel_info = if sel_count > 0 {
+        format!(" [{}] ", sel_count)
+    } else {
+        String::new()
+    };
+
     let mut spans = vec![
         Span::styled(" ", Style::default()),
-        Span::styled("j/k", ks),
-        Span::styled(":nav ", ds),
-        Span::styled("⏎", ks),
-        Span::styled(":detail ", ds),
-        Span::styled("/", ks),
-        Span::styled(":filter ", ds),
-        Span::styled("r", ks),
-        Span::styled(":reload ", ds),
-        Span::styled("+/-", ks),
-        Span::styled(":fetch ", ds),
-        Span::styled("esc", ks),
-        Span::styled(":back ", ds),
-        Span::styled("q", ks),
-        Span::styled(":quit", ds),
+        Span::styled("spc", ks),
+        Span::styled(":select ", ds),
+        Span::styled("a", ks),
+        Span::styled(":all ", ds),
+        Span::styled("C", ks),
+        Span::styled(":copy ", ds),
+        Span::styled("D", ks),
+        Span::styled(":del ", ds),
+        Span::styled("e", ks),
+        Span::styled(":export ", ds),
+        Span::styled("R", ks),
+        Span::styled(":resend ", ds),
+        Span::styled("?", ks),
+        Span::styled(":help", ds),
     ];
+    if !sel_info.is_empty() {
+        spans.push(Span::styled(sel_info, Style::default().fg(app.theme.success).bold()));
+    }
     spans.extend(super::update_hint_spans(app));
     spans.push(Span::styled("  │ ", Style::default().fg(app.theme.divider)));
     spans.push(Span::styled(status_text, Style::default().fg(status_color)));

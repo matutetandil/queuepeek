@@ -15,7 +15,14 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         Popup::ConfirmPurge => draw_confirm(frame, app, "Purge Queue", "Purge all messages from this queue?"),
         Popup::ConfirmDelete => draw_confirm(frame, app, "Delete Queue", "Delete this queue permanently?"),
         Popup::QueuePicker(_) => draw_queue_picker(frame, app),
+        Popup::MessageQueuePicker(_) => draw_queue_picker(frame, app),
         Popup::OperationProgress => draw_operation_progress(frame, app),
+        Popup::ConfirmDeleteMessages => {
+            let count = app.selection_count();
+            draw_confirm(frame, app, "Delete Messages",
+                &format!("Delete {} selected message(s)?\n\nThis consumes all messages and re-publishes\nthe ones not selected. This is destructive.", count));
+        }
+        Popup::ExportMessages => {}
         Popup::None => {}
     }
 }
