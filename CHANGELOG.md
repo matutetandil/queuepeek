@@ -6,6 +6,7 @@
 - Renamed project from rabbitpeek to queuepeek
 - Config path changed from `~/.config/rabbitpeek/` to `~/.config/queuepeek/`
 - Default port auto-updates when switching backend type in profile form (RabbitMQ: 15672, Kafka: 9092, MQTT: 1883)
+- Message list Esc behavior is now two-stage: first press clears selection, second press goes back to queue list
 
 ### Added
 - Kafka backend implementation using rdkafka (librdkafka)
@@ -20,6 +21,65 @@
   - TLS support with CA and client certificates
   - Note: MQTT consumes messages on read (no non-destructive peek)
 - `topics` field in profile configuration for MQTT pre-configured topic monitoring
+- Publish message operation (`P` key on queue list)
+  - Multi-line body editor with routing key and content type fields
+  - RabbitMQ: publishes via default exchange using queue name as routing key
+  - Kafka: publishes via BaseProducer
+  - MQTT: publishes with QoS 1
+- Purge queue operation (`x` key on queue list, RabbitMQ only)
+  - Removes all messages from the selected queue
+  - Requires confirmation before executing
+- Delete queue/topic operation (`D` key on queue list)
+  - Supported on RabbitMQ and Kafka
+  - Requires confirmation before executing
+- Copy messages operation (`C` key on queue list)
+  - Non-destructive copy of all messages from one queue to another
+  - Preserves message order
+  - Uses peek (ack_requeue_true) + publish internally
+  - Progress bar with cancellation support
+- Move messages operation (`m` key on queue list)
+  - Destructive move: consumes from source, publishes to destination
+  - Preserves message order
+  - Progress bar with cancellation support
+- Queue picker popup for selecting copy/move destination
+  - Filter queues with `/`
+  - Keyboard navigation with `j`/`k`
+- Multi-select in message list
+  - Space toggles selection on the focused message; visual checkbox prefix (☑/☐) on each row
+  - `a` selects all messages; pressing `a` again when all are selected deselects all
+  - Selection count shown in the screen header and footer
+- Copy selected messages to another queue (`C` key in message list)
+  - Opens the queue picker popup to choose the destination
+  - Only the selected messages are copied, preserving their order
+  - RabbitMQ only
+- Delete selected messages (`D` key in message list)
+  - Uses a consume-all-and-requeue approach: fetches all messages, discards the selected ones, and requeues the rest
+  - Destructive operation; requires confirmation before executing
+  - RabbitMQ only
+- Export selected messages to JSON (`e` key in message list)
+  - Writes selected messages to a `.json` file in the current working directory
+  - File is named after the queue and a timestamp (e.g. `my-queue-20260408-153012.json`)
+  - Available on all backends
+- Re-publish selected messages (`R` key in message list)
+  - Re-publishes each selected message back to the same queue
+  - Useful for retry workflows or testing message processing
+  - RabbitMQ and Kafka supported
+- Dump entire queue to JSONL file (`W` key in message list)
+  - Non-destructive peek-based dump, streaming with low memory usage
+  - Output file: `queuepeek-dump-{queue}-{timestamp}.jsonl`
+- Stream-based delete implementation
+  - Consumes messages in batches of 100, writing to a temp JSONL backup
+  - Re-publishes non-selected messages by reading the backup line by line
+  - Backup file persists on failure for manual recovery
+  - Constant memory usage regardless of queue size
+- Auto-update system via GitHub Releases
+  - Checks for new versions on startup and every hour
+  - Non-intrusive footer notification when an update is available
+  - Press `U` to self-update the binary
+- Backend type picker popup with descriptions in profile form
+- Cloud host auto-detection (sets port 443 and TLS for known providers)
+- Dynamic footer hints that change based on focused profile form field
+- Optional vhost field (shows namespace picker when empty)
 
 ---
 

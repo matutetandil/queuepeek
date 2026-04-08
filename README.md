@@ -1,10 +1,10 @@
 # queuepeek
 
-A terminal UI for inspecting message queues, built with Rust and ratatui.
+A terminal UI for inspecting and managing message queues, built with Rust and ratatui.
 
 ## Overview
 
-queuepeek connects to message broker management APIs and lets you browse queues/topics and read messages from the terminal. The interface follows a wizard-style drill-down flow: select a profile, pick a queue, browse messages, and inspect individual message detail.
+queuepeek connects to message broker management APIs and lets you browse queues/topics, read messages, publish messages, and perform queue management operations from the terminal. The interface follows a wizard-style drill-down flow: select a profile, pick a queue, browse messages, and inspect individual message detail.
 
 ## Features
 
@@ -26,6 +26,20 @@ queuepeek connects to message broker management APIs and lets you browse queues/
 - Vhost and namespace picker
 - Profile form with type selection (rabbitmq / kafka / mqtt)
 - Cloud host auto-detection
+- Publish messages to a queue or topic with a multi-line body editor
+- Purge all messages from a queue (RabbitMQ) with confirmation
+- Delete a queue or topic (RabbitMQ, Kafka) with confirmation
+- Copy all messages from one queue to another, preserving order
+- Move all messages from one queue to another (destructive)
+- Queue picker popup with filter for selecting copy/move destination
+- Multi-select messages with visual checkboxes (Space to toggle, 'a' to select/deselect all)
+- Copy selected messages to another queue via queue picker popup
+- Delete selected messages with confirmation (consume-and-requeue approach)
+- Export selected messages to a JSON file in the current directory
+- Re-publish selected messages to the same queue (useful for retry workflows)
+- Dump entire queue to JSONL file (non-destructive, streaming, low memory)
+- Stream-based delete uses temp file backup for safe recovery on failure
+- Auto-update check on startup and hourly via GitHub Releases
 
 ## Supported Backends
 
@@ -37,11 +51,29 @@ queuepeek connects to message broker management APIs and lets you browse queues/
 
 ### Backend Details
 
-**RabbitMQ** uses the Management HTTP API. Messages are peeked using `ack_requeue_true`, so the queue state is never modified.
+**RabbitMQ** uses the Management HTTP API. Messages are peeked using `ack_requeue_true`, so the queue state is never modified during inspection. Publish uses the default exchange with the queue name as the routing key. Purge and delete are supported via the management API.
 
-**Kafka** connects via the native protocol using `librdkafka`. Topics are discovered from cluster metadata, and messages are consumed from tail offsets using ephemeral consumer groups with auto-commit disabled.
+**Kafka** connects via the native protocol using `librdkafka`. Topics are discovered from cluster metadata, and messages are consumed from tail offsets using ephemeral consumer groups with auto-commit disabled. Publishing uses `BaseProducer`. Topic deletion is supported.
 
-**MQTT** connects via the MQTT protocol. Topics are discovered by subscribing to the wildcard topic `#`, or you can pre-configure specific topics in your profile. Note: MQTT subscriptions consume messages — there is no non-destructive peek. A warning is displayed in the UI.
+**MQTT** connects via the MQTT protocol. Topics are discovered by subscribing to the wildcard topic `#`, or you can pre-configure specific topics in your profile. Note: MQTT subscriptions consume messages — there is no non-destructive peek. A warning is displayed in the UI. Publishing uses QoS 1.
+
+### Operation Support Matrix
+
+| Operation              | RabbitMQ | Kafka | MQTT |
+|------------------------|----------|-------|------|
+| List queues            | Yes      | Yes   | Yes  |
+| Fetch messages         | Yes      | Yes   | Yes  |
+| Publish                | Yes      | Yes   | Yes  |
+| Purge queue            | Yes      | No    | No   |
+| Delete queue           | Yes      | Yes   | No   |
+| Copy messages          | Yes      | No    | No   |
+| Move messages          | Yes      | No    | No   |
+| Multi-select messages  | Yes      | Yes   | Yes  |
+| Copy selected messages | Yes      | No    | No   |
+| Delete selected        | Yes      | No    | No   |
+| Export selected to JSON| Yes      | Yes   | Yes  |
+| Re-publish selected    | Yes      | Yes   | No   |
+| Dump queue to JSONL    | Yes      | Yes   | Yes  |
 
 ## Prerequisites
 
@@ -135,11 +167,11 @@ queuepeek
 The wizard flow proceeds through four screens:
 
 1. **Profile selection** — Choose a saved profile or create a new one.
-2. **Queue list** — Browse queues/topics for the active namespace. Queues auto-refresh every 5 seconds. Filter by name with `/`.
-3. **Message list** — Browse fetched messages for the selected queue/topic. Filter messages with `/`.
+2. **Queue list** — Browse queues/topics for the active namespace. Queues auto-refresh every 5 seconds. Filter by name with `/`. Publish, purge, delete, copy, and move operations are available here.
+3. **Message list** — Browse fetched messages for the selected queue/topic. Filter messages with `/`. Use Space to select individual messages or `a` to select all. Perform bulk operations on the selection with `C`, `D`, `e`, or `R`.
 4. **Message detail** — View full message payload, headers, and metadata. Toggle pretty-print, copy to clipboard, scroll through the payload.
 
-Press `Esc` or `Backspace` at any screen to go back one level.
+Press `Esc` or `Backspace` at any screen to go back one level. In the message list, the first `Esc` clears the current selection; the second `Esc` returns to the queue list.
 
 ## Keyboard Shortcuts
 
@@ -157,29 +189,63 @@ Press `Esc` or `Backspace` at any screen to go back one level.
 
 ### Queue List Screen
 
-| Key          | Action                          |
-|--------------|---------------------------------|
-| `j` / Down   | Move selection down             |
-| `k` / Up     | Move selection up               |
-| `Enter`      | Open selected queue             |
-| `/`          | Filter queues by name           |
-| `r`          | Refresh queue list              |
-| `t`          | Open theme picker               |
-| `Esc`        | Go back to profile screen       |
-| `q` / Ctrl+C | Quit                            |
+| Key          | Action                                              |
+|--------------|-----------------------------------------------------|
+| `j` / Down   | Move selection down                                 |
+| `k` / Up     | Move selection up                                   |
+| `Enter`      | Open selected queue                                 |
+| `/`          | Filter queues by name                               |
+| `r`          | Refresh queue list                                  |
+| `P`          | Publish a message to the selected queue             |
+| `x`          | Purge selected queue (RabbitMQ, with confirmation)  |
+| `D`          | Delete selected queue/topic (with confirmation)     |
+| `C`          | Copy all messages to another queue (with picker)    |
+| `m`          | Move all messages to another queue (with picker)    |
+| `t`          | Open theme picker                                   |
+| `Esc`        | Go back to profile screen                           |
+| `q` / Ctrl+C | Quit                                                |
+
+### Queue Picker Popup (Copy / Move destination)
+
+| Key        | Action                          |
+|------------|---------------------------------|
+| `j` / Down | Move selection down             |
+| `k` / Up   | Move selection up               |
+| `/`        | Filter queues by name           |
+| `Enter`    | Confirm destination queue       |
+| `Esc`      | Cancel                          |
+
+### Publish Message Popup
+
+| Key         | Action                 |
+|-------------|------------------------|
+| `Tab`       | Move to next field     |
+| `Shift+Tab` | Move to previous field |
+| `Enter`     | Send message           |
+| `Esc`       | Cancel                 |
 
 ### Message List Screen
 
-| Key          | Action                          |
-|--------------|---------------------------------|
-| `j` / Down   | Move selection down             |
-| `k` / Up     | Move selection up               |
-| `Enter`      | Open message detail             |
-| `/`          | Filter messages                 |
-| `n`          | Open fetch count picker         |
-| `r`          | Re-fetch messages               |
-| `Esc`        | Go back to queue list           |
-| `q` / Ctrl+C | Quit                            |
+| Key          | Action                                                          |
+|--------------|-----------------------------------------------------------------|
+| `j` / Down   | Move selection down                                             |
+| `k` / Up     | Move selection up                                               |
+| `Enter`      | Open message detail                                             |
+| `/`          | Filter messages                                                 |
+| `Space`      | Toggle selection on the current message (shows checkbox)        |
+| `a`          | Select all messages / deselect all if all are selected          |
+| `n`          | Open fetch count picker                                         |
+| `r`          | Re-fetch messages                                               |
+| `C`          | Copy selected messages to another queue (queue picker popup)    |
+| `D`          | Delete selected messages (destructive, with confirmation)       |
+| `e`          | Export selected messages to a JSON file in the current directory|
+| `R`          | Re-publish selected messages to the same queue                  |
+| `W`          | Dump entire queue to JSONL file (non-destructive, streaming)    |
+| `P`          | Publish a new message to the current queue                      |
+| `Esc`        | Clear selection (first press) / go back to queue list (second)  |
+| `q` / Ctrl+C | Quit                                                            |
+
+Selection state is shown as a checkbox prefix on each message row (☑ selected, ☐ unselected). The number of selected messages is displayed in the screen header and in the footer when at least one message is selected.
 
 ### Message Detail Screen
 
@@ -204,6 +270,7 @@ Press `Esc` or `Backspace` at any screen to go back one level.
 - [rumqttc](https://github.com/bytebeamio/rumqtt) — MQTT client
 - [serde / toml](https://github.com/toml-rs/toml) — Configuration parsing
 - [arboard](https://github.com/1Password/arboard) — Clipboard support
+- [self_update](https://github.com/jaemk/self_update) — Auto-update from GitHub Releases
 
 ## License
 
