@@ -163,6 +163,26 @@ impl ProfileForm {
         }
     }
 
+    fn is_cloud_host(host: &str) -> bool {
+        let h = host.to_lowercase();
+        h.contains("cloudamqp.com") || h.contains("amazonaws.com")
+            || h.contains("azure.com") || h.contains("rabbitmq.cloud")
+    }
+
+    fn auto_detect_cloud(&mut self) {
+        if self.profile_type != "rabbitmq" { return; }
+        let default = Self::default_port("rabbitmq");
+        if Self::is_cloud_host(&self.host) {
+            if self.port == default || self.port.is_empty() {
+                self.port = "443".to_string();
+            }
+            self.tls = true;
+        } else if self.port == "443" {
+            self.port = default.to_string();
+            self.tls = false;
+        }
+    }
+
     pub fn default_port(backend_type: &str) -> &'static str {
         match backend_type {
             "kafka" => "9092",
@@ -190,7 +210,10 @@ impl ProfileForm {
         }
         match self.focused_field {
             1 => self.name.push(c),
-            2 => self.host.push(c),
+            2 => {
+                self.host.push(c);
+                self.auto_detect_cloud();
+            }
             3 => self.port.push(c),
             4 => self.username.push(c),
             5 => self.password.push(c),
@@ -203,7 +226,7 @@ impl ProfileForm {
         if self.focused_field == 0 || self.focused_field == 7 { return; }
         match self.focused_field {
             1 => { self.name.pop(); }
-            2 => { self.host.pop(); }
+            2 => { self.host.pop(); self.auto_detect_cloud(); }
             3 => { self.port.pop(); }
             4 => { self.username.pop(); }
             5 => { self.password.pop(); }
