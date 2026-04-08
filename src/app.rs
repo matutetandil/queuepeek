@@ -36,6 +36,7 @@ pub enum Popup {
     NamespacePicker,
     FetchCount,
     ThemePicker,
+    BackendTypePicker,
 }
 
 pub const FETCH_PRESETS: &[u32] = &[10, 25, 50, 100, 250, 500];
@@ -191,19 +192,18 @@ impl ProfileForm {
         }
     }
 
-    pub fn push_char(&mut self, c: char) {
-        // Toggle fields
-        if self.focused_field == 0 {
-            // Cycle backend type
-            let idx = BACKEND_TYPES.iter().position(|&t| t == self.profile_type).unwrap_or(0);
-            let old_default = Self::default_port(&self.profile_type);
-            self.profile_type = BACKEND_TYPES[(idx + 1) % BACKEND_TYPES.len()].to_string();
-            // Auto-update port if it was the default for the old type
-            if self.port == old_default || self.port.is_empty() {
-                self.port = Self::default_port(&self.profile_type).to_string();
-            }
-            return;
+    pub fn set_backend_type(&mut self, new_type: &str) {
+        let old_default = Self::default_port(&self.profile_type);
+        self.profile_type = new_type.to_string();
+        if self.port == old_default || self.port.is_empty() {
+            self.port = Self::default_port(&self.profile_type).to_string();
         }
+        self.auto_detect_cloud();
+    }
+
+    pub fn push_char(&mut self, c: char) {
+        // Type field is read-only — use BackendTypePicker popup via Enter
+        if self.focused_field == 0 { return; }
         if self.focused_field == 7 {
             self.tls = !self.tls;
             return;

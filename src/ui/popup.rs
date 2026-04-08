@@ -10,6 +10,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         Popup::NamespacePicker => draw_namespace_picker(frame, app),
         Popup::FetchCount => draw_fetch_count(frame, app),
         Popup::ThemePicker => draw_theme_picker(frame, app),
+        Popup::BackendTypePicker => draw_backend_type_picker(frame, app),
         Popup::None => {}
     }
 }
@@ -188,6 +189,46 @@ fn draw_theme_picker(frame: &mut Frame, app: &mut App) {
             Span::styled("■", Style::default().fg(t.selected_bg)),
         ]);
         ListItem::new(swatch)
+    }).collect();
+
+    let list = List::new(items)
+        .block(block)
+        .highlight_style(
+            Style::default().bg(app.theme.selected_bg).fg(app.theme.white).add_modifier(Modifier::BOLD)
+        )
+        .highlight_symbol("▸ ");
+
+    frame.render_stateful_widget(list, popup_area, &mut app.popup_list_state);
+}
+
+fn draw_backend_type_picker(frame: &mut Frame, app: &mut App) {
+    use crate::app::BACKEND_TYPES;
+
+    let popup_area = centered_rect(40, 30, frame.area());
+    frame.render_widget(Clear, popup_area);
+
+    let block = Block::bordered()
+        .title(" Backend Type ")
+        .title_style(Style::default().fg(app.theme.accent).bold())
+        .border_style(Style::default().fg(app.theme.accent))
+        .style(Style::default().bg(app.theme.bg));
+
+    let descriptions = ["RabbitMQ — AMQP broker", "Kafka — Event streaming", "MQTT — IoT messaging"];
+
+    let items: Vec<ListItem> = BACKEND_TYPES.iter().enumerate().map(|(i, &name)| {
+        let is_current = name == app.profile_form.profile_type;
+        let desc = descriptions.get(i).unwrap_or(&"");
+        let label = if is_current {
+            format!("* {:<10} {}", name, desc)
+        } else {
+            format!("  {:<10} {}", name, desc)
+        };
+        let st = if is_current {
+            Style::default().fg(app.theme.accent).bold()
+        } else {
+            Style::default().fg(app.theme.primary)
+        };
+        ListItem::new(Line::from(Span::styled(label, st)))
     }).collect();
 
     let list = List::new(items)

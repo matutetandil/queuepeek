@@ -197,6 +197,20 @@ fn handle_profile_form_key(app: &mut App, code: KeyCode) {
             app.profile_form.push_char(c);
         }
         KeyCode::Enter => {
+            // Open backend type picker popup when on Type field
+            if app.profile_form.focused_field == 0 {
+                app.popup = Popup::BackendTypePicker;
+                let idx = app::BACKEND_TYPES.iter()
+                    .position(|&t| t == app.profile_form.profile_type)
+                    .unwrap_or(0);
+                app.popup_list_state.select(Some(idx));
+                return;
+            }
+            // Also toggle TLS on Enter
+            if app.profile_form.focused_field == 7 {
+                app.profile_form.tls = !app.profile_form.tls;
+                return;
+            }
             match app.profile_form.to_profile() {
                 Ok(profile) => {
                     let name = app.profile_form.name.clone();
@@ -729,6 +743,28 @@ fn handle_popup_key(app: &mut App, code: KeyCode) {
                         app.fetch_count = presets[selected];
                         app.popup = Popup::None;
                         app.set_status(format!("Fetch count: {}", app.fetch_count), false);
+                    }
+                }
+                _ => {}
+            }
+        }
+        Popup::BackendTypePicker => {
+            let types = app::BACKEND_TYPES;
+            match code {
+                KeyCode::Esc => app.popup = Popup::None,
+                KeyCode::Char('j') | KeyCode::Down => {
+                    let i = app.popup_list_state.selected().unwrap_or(0);
+                    if i + 1 < types.len() { app.popup_list_state.select(Some(i + 1)); }
+                }
+                KeyCode::Char('k') | KeyCode::Up => {
+                    let i = app.popup_list_state.selected().unwrap_or(0);
+                    if i > 0 { app.popup_list_state.select(Some(i - 1)); }
+                }
+                KeyCode::Enter => {
+                    let selected = app.popup_list_state.selected().unwrap_or(0);
+                    if selected < types.len() {
+                        app.profile_form.set_backend_type(types[selected]);
+                        app.popup = Popup::None;
                     }
                 }
                 _ => {}
