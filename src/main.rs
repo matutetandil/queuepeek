@@ -2,6 +2,7 @@ mod app;
 mod config;
 mod backend;
 mod ui;
+mod updater;
 
 use std::io;
 use std::time::{Duration, Instant};
@@ -45,8 +46,17 @@ fn main() -> io::Result<()> {
 fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App) -> io::Result<()> {
     let mut last_refresh = Instant::now();
 
+    // Trigger initial update check
+    app.update_checker.start_check();
+
     loop {
         app.process_bg_results();
+        app.update_checker.poll();
+
+        // Periodic update check
+        if app.update_checker.should_check() {
+            app.update_checker.start_check();
+        }
 
         // Auto-refresh queues every 5 seconds when on QueueList screen
         if app.screen == Screen::QueueList && !app.loading && last_refresh.elapsed() >= Duration::from_secs(5) {
@@ -81,6 +91,16 @@ fn handle_key(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
     // Ctrl+C always quits
     if code == KeyCode::Char('c') && modifiers.contains(KeyModifiers::CONTROL) {
         app.should_quit = true;
+        return;
+    }
+
+    // Global: U to trigger update (only when update is available and no popup open)
+    if code == KeyCode::Char('U') && app.popup == Popup::None && app.update_checker.update_available {
+        app.set_status("Updating...", false);
+        match updater::perform_update() {
+            Ok(msg) => app.set_status(msg, false),
+            Err(e) => app.set_status(format!("Update failed: {}", e), true),
+        }
         return;
     }
 

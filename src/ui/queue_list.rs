@@ -220,7 +220,7 @@ fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
         ("", app.theme.muted)
     };
 
-    let line = Line::from(vec![
+    let mut spans = vec![
         Span::styled(" ", Style::default()),
         Span::styled("j/k", ks),
         Span::styled(":nav ", ds),
@@ -234,9 +234,11 @@ fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
         Span::styled(":back ", ds),
         Span::styled("q", ks),
         Span::styled(":quit", ds),
-        Span::styled("  │ ", Style::default().fg(app.theme.divider)),
-        Span::styled(status_text, Style::default().fg(status_color)),
-    ]);
+    ];
+    spans.extend(super::update_hint_spans(app));
+    spans.push(Span::styled("  │ ", Style::default().fg(app.theme.divider)));
+    spans.push(Span::styled(status_text, Style::default().fg(status_color)));
+    let line = Line::from(spans);
 
     frame.render_widget(
         Paragraph::new(line).style(Style::default().bg(app.theme.sidebar_bg)),

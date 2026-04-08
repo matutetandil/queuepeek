@@ -5,6 +5,7 @@ use ratatui::widgets::ListState;
 use crate::config::{Config, Profile};
 use crate::backend::{Backend, BrokerInfo, QueueInfo, MessageInfo};
 use crate::ui::theme::{get_theme, Theme};
+use crate::updater::UpdateChecker;
 
 // Background task results sent via channel
 pub enum BgResult {
@@ -99,6 +100,9 @@ pub struct App {
     // Background channel
     pub bg_sender: mpsc::Sender<BgResult>,
     pub bg_receiver: mpsc::Receiver<BgResult>,
+
+    // Auto-update
+    pub update_checker: UpdateChecker,
 }
 
 pub const BACKEND_TYPES: &[&str] = &["rabbitmq", "kafka", "mqtt"];
@@ -334,6 +338,7 @@ impl App {
             popup_list_state: ListState::default(),
             bg_sender: tx,
             bg_receiver: rx,
+            update_checker: UpdateChecker::new(),
         }
     }
 

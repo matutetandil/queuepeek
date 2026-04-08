@@ -71,15 +71,19 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     let ks = Style::default().fg(theme.accent).add_modifier(Modifier::BOLD).bg(theme.bg);
     let ds = Style::default().fg(theme.muted).bg(theme.bg);
     let footer_line = match &app.profile_mode {
-        ProfileMode::Select => Line::from(vec![
-            Span::styled("j/k", ks), Span::styled(":nav ", ds),
-            Span::styled("⏎", ks), Span::styled(":connect ", ds),
-            Span::styled("a", ks), Span::styled(":add ", ds),
-            Span::styled("e", ks), Span::styled(":edit ", ds),
-            Span::styled("d", ks), Span::styled(":del ", ds),
-            Span::styled("t", ks), Span::styled(":theme ", ds),
-            Span::styled("q", ks), Span::styled(":quit", ds),
-        ]),
+        ProfileMode::Select => {
+            let mut spans = vec![
+                Span::styled("j/k", ks), Span::styled(":nav ", ds),
+                Span::styled("⏎", ks), Span::styled(":connect ", ds),
+                Span::styled("a", ks), Span::styled(":add ", ds),
+                Span::styled("e", ks), Span::styled(":edit ", ds),
+                Span::styled("d", ks), Span::styled(":del ", ds),
+                Span::styled("t", ks), Span::styled(":theme ", ds),
+                Span::styled("q", ks), Span::styled(":quit", ds),
+            ];
+            spans.extend(super::update_hint_spans(app));
+            Line::from(spans)
+        }
         ProfileMode::ConfirmDelete => Line::from(vec![
             Span::styled("Delete? ", ds),
             Span::styled("y", ks), Span::styled("/", ds), Span::styled("n", ks),
@@ -90,11 +94,13 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
                 7 => ":toggle ",
                 _ => ":save ",
             };
-            Line::from(vec![
+            let mut spans = vec![
                 Span::styled("tab", ks), Span::styled(":next ", ds),
                 Span::styled("⏎", ks), Span::styled(enter_hint, ds),
                 Span::styled("esc", ks), Span::styled(":cancel", ds),
-            ])
+            ];
+            spans.extend(super::update_hint_spans(app));
+            Line::from(spans)
         }
     };
     let footer = Paragraph::new(footer_line).style(Style::default().bg(theme.bg));

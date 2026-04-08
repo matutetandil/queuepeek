@@ -266,14 +266,16 @@ fn pretty_xml(xml: &str) -> String {
 fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
     let ks = Style::default().fg(app.theme.accent).bg(app.theme.sidebar_bg);
     let ds = Style::default().fg(app.theme.muted).bg(app.theme.sidebar_bg);
-    let footer = Line::from(vec![
+    let mut spans = vec![
         Span::styled("  j/k", ks), Span::styled(":scroll ", ds),
         Span::styled("p", ks), Span::styled(":pretty ", ds),
         Span::styled("c", ks), Span::styled(":copy payload ", ds),
         Span::styled("h", ks), Span::styled(":copy headers ", ds),
         Span::styled("esc", ks), Span::styled(":back ", ds),
         Span::styled("q", ks), Span::styled(":quit", ds),
-    ]);
+    ];
+    spans.extend(super::update_hint_spans(app));
+    let footer = Line::from(spans);
     let bar = Paragraph::new(footer)
         .style(Style::default().bg(app.theme.sidebar_bg));
     frame.render_widget(bar, area);
