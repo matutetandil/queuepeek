@@ -106,9 +106,9 @@ fn handle_key(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
 
     match app.screen {
         Screen::ProfileSelect => handle_profile_key(app, code, modifiers),
-        Screen::QueueList     => handle_queue_list_key(app, code),
-        Screen::MessageList   => handle_message_list_key(app, code),
-        Screen::MessageDetail => handle_message_detail_key(app, code),
+        Screen::QueueList     => handle_queue_list_key(app, code, modifiers),
+        Screen::MessageList   => handle_message_list_key(app, code, modifiers),
+        Screen::MessageDetail => handle_message_detail_key(app, code, modifiers),
     }
 }
 
@@ -116,10 +116,10 @@ fn handle_key(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
 // Profile screen
 // ---------------------------------------------------------------------------
 
-fn handle_profile_key(app: &mut App, code: KeyCode, _modifiers: KeyModifiers) {
+fn handle_profile_key(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
     // Popups first (theme picker, etc.)
     if app.popup != Popup::None {
-        handle_popup_key(app, code);
+        handle_popup_key(app, code, modifiers);
         return;
     }
 
@@ -279,10 +279,10 @@ fn handle_profile_delete_key(app: &mut App, code: KeyCode) {
 // Queue list screen
 // ---------------------------------------------------------------------------
 
-fn handle_queue_list_key(app: &mut App, code: KeyCode) {
+fn handle_queue_list_key(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
     // Popups first
     if app.popup != Popup::None {
-        handle_popup_key(app, code);
+        handle_popup_key(app, code, modifiers);
         return;
     }
 
@@ -367,6 +367,44 @@ fn handle_queue_list_key(app: &mut App, code: KeyCode) {
             app.fetch_count = app.fetch_count.saturating_sub(10).max(1);
             app.set_status(format!("Fetch count: {}", app.fetch_count), false);
         }
+        KeyCode::Char('P') => {
+            // Publish to selected queue
+            if let Some(q) = app.selected_queue() {
+                let name = q.name.clone();
+                app.publish_form = app::PublishForm::new_for_queue(&name);
+                app.popup = Popup::PublishMessage;
+            }
+        }
+        KeyCode::Char('x') => {
+            // Purge selected queue
+            if app.selected_queue().is_some() {
+                app.popup = Popup::ConfirmPurge;
+            }
+        }
+        KeyCode::Char('D') => {
+            // Delete selected queue
+            if app.selected_queue().is_some() {
+                app.popup = Popup::ConfirmDelete;
+            }
+        }
+        KeyCode::Char('C') => {
+            // Copy messages from selected queue
+            if app.selected_queue().is_some() {
+                app.queue_picker_filter.clear();
+                app.queue_picker_filter_active = false;
+                app.popup = Popup::QueuePicker(app::QueueOperation::Copy);
+                app.popup_list_state.select(Some(0));
+            }
+        }
+        KeyCode::Char('m') => {
+            // Move messages from selected queue
+            if app.selected_queue().is_some() {
+                app.queue_picker_filter.clear();
+                app.queue_picker_filter_active = false;
+                app.popup = Popup::QueuePicker(app::QueueOperation::Move);
+                app.popup_list_state.select(Some(0));
+            }
+        }
         _ => {}
     }
 }
@@ -429,10 +467,10 @@ fn handle_queue_filter_key(app: &mut App, code: KeyCode) {
 // Message list screen
 // ---------------------------------------------------------------------------
 
-fn handle_message_list_key(app: &mut App, code: KeyCode) {
+fn handle_message_list_key(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
     // Popups first
     if app.popup != Popup::None {
-        handle_popup_key(app, code);
+        handle_popup_key(app, code, modifiers);
         return;
     }
 
@@ -492,6 +530,10 @@ fn handle_message_list_key(app: &mut App, code: KeyCode) {
         KeyCode::Char('-') => {
             app.fetch_count = app.fetch_count.saturating_sub(10).max(1);
             app.set_status(format!("Fetch count: {}", app.fetch_count), false);
+        }
+        KeyCode::Char('P') => {
+            app.publish_form = app::PublishForm::new_for_queue(&app.current_queue_name);
+            app.popup = Popup::PublishMessage;
         }
         KeyCode::Esc => {
             app.screen = Screen::QueueList;
@@ -564,10 +606,10 @@ fn handle_message_filter_key(app: &mut App, code: KeyCode) {
 // Message detail screen
 // ---------------------------------------------------------------------------
 
-fn handle_message_detail_key(app: &mut App, code: KeyCode) {
+fn handle_message_detail_key(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
     // Popups first
     if app.popup != Popup::None {
-        handle_popup_key(app, code);
+        handle_popup_key(app, code, modifiers);
         return;
     }
 
@@ -636,7 +678,7 @@ fn copy_to_clipboard(text: &str) -> Result<(), String> {
 // Popup key handler (shared across screens)
 // ---------------------------------------------------------------------------
 
-fn handle_popup_key(app: &mut App, code: KeyCode) {
+fn handle_popup_key(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
     match app.popup {
         Popup::Help => {
             match code {
@@ -766,6 +808,144 @@ fn handle_popup_key(app: &mut App, code: KeyCode) {
                     }
                 }
                 _ => {}
+            }
+        }
+        Popup::PublishMessage => {
+            match code {
+                KeyCode::Esc => {
+                    app.popup = Popup::None;
+                    app.publish_form.error.clear();
+                }
+                KeyCode::Tab | KeyCode::Down => {
+                    app.publish_form.focused_field = (app.publish_form.focused_field + 1) % app::PublishForm::field_count();
+                }
+                KeyCode::BackTab | KeyCode::Up => {
+                    let count = app::PublishForm::field_count();
+                    app.publish_form.focused_field = (app.publish_form.focused_field + count - 1) % count;
+                }
+                KeyCode::Enter => {
+                    if app.publish_form.focused_field == 2 {
+                        // In body field, Enter adds newline
+                        app.publish_form.newline();
+                    } else if modifiers.contains(KeyModifiers::CONTROL) || app.publish_form.focused_field != 2 {
+                        // Ctrl+Enter or Enter on non-body field: submit
+                        if app.publish_form.body.is_empty() {
+                            app.publish_form.error = "Body is required".into();
+                        } else {
+                            app.publish_form.error.clear();
+                            app.do_publish();
+                        }
+                    }
+                }
+                KeyCode::Backspace => {
+                    app.publish_form.pop_char();
+                }
+                KeyCode::Char(c) => {
+                    app.publish_form.push_char(c);
+                }
+                _ => {}
+            }
+        }
+        Popup::ConfirmPurge => {
+            match code {
+                KeyCode::Char('y') | KeyCode::Char('Y') => {
+                    if let Some(q) = app.selected_queue() {
+                        let name = q.name.clone();
+                        app.popup = Popup::None;
+                        app.do_purge(&name);
+                    }
+                }
+                _ => {
+                    app.popup = Popup::None;
+                }
+            }
+        }
+        Popup::ConfirmDelete => {
+            match code {
+                KeyCode::Char('y') | KeyCode::Char('Y') => {
+                    if let Some(q) = app.selected_queue() {
+                        let name = q.name.clone();
+                        app.popup = Popup::None;
+                        app.do_delete(&name);
+                    }
+                }
+                _ => {
+                    app.popup = Popup::None;
+                }
+            }
+        }
+        Popup::QueuePicker(_) => {
+            let filtered: Vec<usize> = app.queues.iter().enumerate()
+                .filter(|(_, q)| {
+                    app.queue_picker_filter.is_empty()
+                        || q.name.to_lowercase().contains(&app.queue_picker_filter.to_lowercase())
+                })
+                .map(|(i, _)| i)
+                .collect();
+            let len = filtered.len();
+
+            if app.queue_picker_filter_active {
+                match code {
+                    KeyCode::Char(c) => {
+                        app.queue_picker_filter.push(c);
+                        app.popup_list_state.select(Some(0));
+                    }
+                    KeyCode::Backspace => {
+                        app.queue_picker_filter.pop();
+                        app.popup_list_state.select(Some(0));
+                    }
+                    KeyCode::Esc => {
+                        app.queue_picker_filter.clear();
+                        app.queue_picker_filter_active = false;
+                    }
+                    KeyCode::Enter => {
+                        app.queue_picker_filter_active = false;
+                    }
+                    _ => {}
+                }
+            } else {
+                match code {
+                    KeyCode::Esc => {
+                        app.popup = Popup::None;
+                        app.queue_picker_filter.clear();
+                    }
+                    KeyCode::Char('/') => {
+                        app.queue_picker_filter_active = true;
+                    }
+                    KeyCode::Char('j') | KeyCode::Down => {
+                        let i = app.popup_list_state.selected().unwrap_or(0);
+                        if i + 1 < len { app.popup_list_state.select(Some(i + 1)); }
+                    }
+                    KeyCode::Char('k') | KeyCode::Up => {
+                        let i = app.popup_list_state.selected().unwrap_or(0);
+                        if i > 0 { app.popup_list_state.select(Some(i - 1)); }
+                    }
+                    KeyCode::Enter => {
+                        let selected = app.popup_list_state.selected().unwrap_or(0);
+                        if selected < len {
+                            let dest_idx = filtered[selected];
+                            let dest_name = app.queues[dest_idx].name.clone();
+                            let source_name = app.selected_queue()
+                                .map(|q| q.name.clone())
+                                .unwrap_or_default();
+
+                            if dest_name == source_name {
+                                app.set_status("Source and destination must be different", true);
+                            } else if let Popup::QueuePicker(ref op) = app.popup.clone() {
+                                let op = op.clone();
+                                app.popup = Popup::None;
+                                app.queue_picker_filter.clear();
+                                app.do_copy_or_move(&source_name, &dest_name, op);
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        Popup::OperationProgress => {
+            if code == KeyCode::Esc {
+                app.operation_cancel.store(true, std::sync::atomic::Ordering::Relaxed);
             }
         }
         Popup::BackendTypePicker => {

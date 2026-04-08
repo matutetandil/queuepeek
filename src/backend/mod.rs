@@ -40,4 +40,32 @@ pub trait Backend: Send {
     fn list_queues(&self, namespace: &str) -> Result<Vec<QueueInfo>, String>;
     fn peek_messages(&self, namespace: &str, queue: &str, count: u32) -> Result<Vec<MessageInfo>, String>;
     fn clone_backend(&self) -> Box<dyn Backend>;
+
+    /// Publish a message to a queue/topic
+    fn publish_message(
+        &self,
+        _namespace: &str,
+        _queue: &str,
+        _body: &str,
+        _routing_key: &str,
+        _headers: &[(String, String)],
+        _content_type: &str,
+    ) -> Result<(), String> {
+        Err("Publish not supported by this backend".into())
+    }
+
+    /// Delete a queue/topic entirely
+    fn delete_queue(&self, _namespace: &str, _queue: &str) -> Result<(), String> {
+        Err("Delete not supported by this backend".into())
+    }
+
+    /// Purge all messages from a queue
+    fn purge_queue(&self, _namespace: &str, _queue: &str) -> Result<(), String> {
+        Err("Purge not supported by this backend".into())
+    }
+
+    /// Consume messages destructively (ack without requeue)
+    fn consume_messages(&self, _namespace: &str, _queue: &str, _count: u32) -> Result<Vec<MessageInfo>, String> {
+        Err("Consume not supported by this backend".into())
+    }
 }

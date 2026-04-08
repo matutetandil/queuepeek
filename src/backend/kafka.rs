@@ -4,6 +4,7 @@ use rdkafka::admin::AdminClient;
 use rdkafka::client::DefaultClientContext;
 use rdkafka::config::ClientConfig;
 use rdkafka::consumer::{BaseConsumer, Consumer};
+use rdkafka::producer::Producer;
 use rdkafka::message::{Headers, Message};
 use rdkafka::TopicPartitionList;
 use rdkafka::Offset;
@@ -253,6 +254,73 @@ impl Backend for KafkaBackend {
         }
 
         Ok(messages)
+    }
+
+    fn publish_message(
+        &self,
+        _namespace: &str,
+        queue: &str,
+        body: &str,
+        routing_key: &str,
+        headers: &[(String, String)],
+        _content_type: &str,
+    ) -> Result<(), String> {
+        use rdkafka::producer::{BaseProducer, BaseRecord};
+        use rdkafka::message::OwnedHeaders;
+
+        let producer: BaseProducer = self.base_config()
+            .set("message.timeout.ms", "5000")
+            .create()
+            .map_err(|e| format!("Creating Kafka producer: {}", e))?;
+
+        let mut record = BaseRecord::to(queue).payload(body);
+
+        let key_str;
+        if !routing_key.is_empty() && !routing_key.starts_with("partition-") {
+            key_str = routing_key.to_string();
+            record = record.key(&key_str);
+        }
+
+        if !headers.is_empty() {
+            let mut kafka_headers = OwnedHeaders::new();
+            for (k, v) in headers {
+                kafka_headers = kafka_headers.insert(rdkafka::message::Header { key: k, value: Some(v.as_bytes()) });
+            }
+            record = record.headers(kafka_headers);
+        }
+
+        producer.send(record)
+            .map_err(|(e, _)| format!("Sending message: {}", e))?;
+
+        producer.flush(Duration::from_secs(5))
+            .map_err(|e| format!("Flushing producer: {}", e))?;
+
+        Ok(())
+    }
+
+    fn delete_queue(&self, _namespace: &str, queue: &str) -> Result<(), String> {
+        use rdkafka::admin::AdminOptions;
+
+        let admin = self.make_admin()?;
+        let opts = AdminOptions::new();
+        let topics = &[queue];
+
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .map_err(|e| format!("Creating runtime: {}", e))?;
+
+        rt.block_on(async {
+            let results = admin.delete_topics(topics, &opts).await
+                .map_err(|e| format!("Deleting topic: {}", e))?;
+
+            for result in results {
+                if let Err((_, e)) = result {
+                    return Err(format!("Deleting topic '{}': {}", queue, e));
+                }
+            }
+            Ok(())
+        })
     }
 
     fn clone_backend(&self) -> Box<dyn Backend> {

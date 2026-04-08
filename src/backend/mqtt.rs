@@ -246,6 +246,59 @@ impl Backend for MqttBackend {
         Ok(messages)
     }
 
+    fn publish_message(
+        &self,
+        _namespace: &str,
+        queue: &str,
+        body: &str,
+        _routing_key: &str,
+        _headers: &[(String, String)],
+        _content_type: &str,
+    ) -> Result<(), String> {
+        let client_id = format!("queuepeek-pub-{}", uuid::Uuid::new_v4());
+        let opts = self.make_options(&client_id)?;
+        let (client, mut connection) = Client::new(opts, 10);
+
+        let topic = queue.to_string();
+        let payload = body.as_bytes().to_vec();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let mut connected = false;
+        let mut published = false;
+
+        for notification in connection.iter() {
+            if Instant::now() > deadline { break; }
+            match notification {
+                Ok(Event::Incoming(Packet::ConnAck(_))) => {
+                    connected = true;
+                    client.publish(&topic, QoS::AtLeastOnce, false, payload.clone())
+                        .map_err(|e| format!("Publishing: {}", e))?;
+                }
+                Ok(Event::Incoming(Packet::PubAck(_))) => {
+                    published = true;
+                    break;
+                }
+                Err(e) => {
+                    if !connected {
+                        return Err(format!("MQTT connection failed: {}", e));
+                    }
+                    break;
+                }
+                _ => {}
+            }
+        }
+
+        let _ = client.disconnect();
+
+        if !published && connected {
+            // QoS 0 won't get PubAck, consider it sent
+            return Ok(());
+        }
+        if !connected {
+            return Err("Failed to connect to MQTT broker".into());
+        }
+        Ok(())
+    }
+
     fn clone_backend(&self) -> Box<dyn Backend> {
         Box::new(Self {
             host: self.host.clone(),

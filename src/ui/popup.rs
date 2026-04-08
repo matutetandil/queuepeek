@@ -1,7 +1,7 @@
 use ratatui::prelude::*;
 use ratatui::widgets::*;
 
-use crate::app::{App, Popup};
+use crate::app::{App, Popup, PublishForm, QueueOperation};
 
 pub fn draw(frame: &mut Frame, app: &mut App) {
     match &app.popup {
@@ -11,6 +11,11 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         Popup::FetchCount => draw_fetch_count(frame, app),
         Popup::ThemePicker => draw_theme_picker(frame, app),
         Popup::BackendTypePicker => draw_backend_type_picker(frame, app),
+        Popup::PublishMessage => draw_publish(frame, app),
+        Popup::ConfirmPurge => draw_confirm(frame, app, "Purge Queue", "Purge all messages from this queue?"),
+        Popup::ConfirmDelete => draw_confirm(frame, app, "Delete Queue", "Delete this queue permanently?"),
+        Popup::QueuePicker(_) => draw_queue_picker(frame, app),
+        Popup::OperationProgress => draw_operation_progress(frame, app),
         Popup::None => {}
     }
 }
@@ -30,7 +35,7 @@ fn centered_rect(percent_x: u16, percent_y: u16, area: Rect) -> Rect {
 }
 
 fn draw_help(frame: &mut Frame, app: &App) {
-    let popup_area = centered_rect(60, 60, frame.area());
+    let popup_area = centered_rect(60, 70, frame.area());
     frame.render_widget(Clear, popup_area);
 
     let block = Block::bordered()
@@ -49,7 +54,11 @@ fn draw_help(frame: &mut Frame, app: &App) {
         ("+/-", "Adjust fetch count"),
         ("c", "Copy payload (detail)"),
         ("h", "Copy headers (detail)"),
-        ("P", "Toggle pretty (detail)"),
+        ("P", "Publish message"),
+        ("x", "Purge queue"),
+        ("D", "Delete queue"),
+        ("C", "Copy messages to queue"),
+        ("m", "Move messages to queue"),
         ("esc", "Go back"),
         ("?", "Toggle help"),
         ("q", "Quit"),
@@ -177,7 +186,6 @@ fn draw_theme_picker(frame: &mut Frame, app: &mut App) {
     let items: Vec<ListItem> = names.iter().enumerate().map(|(i, &name)| {
         let t = &THEMES[i];
         let is_current = name == app.theme.name;
-        // Color preview swatches
         let swatch = Line::from(vec![
             Span::styled(if is_current { "* " } else { "  " },
                 Style::default().fg(if is_current { app.theme.accent } else { app.theme.primary })),
@@ -239,4 +247,227 @@ fn draw_backend_type_picker(frame: &mut Frame, app: &mut App) {
         .highlight_symbol("▸ ");
 
     frame.render_stateful_widget(list, popup_area, &mut app.popup_list_state);
+}
+
+fn draw_publish(frame: &mut Frame, app: &mut App) {
+    let popup_area = centered_rect(60, 70, frame.area());
+    frame.render_widget(Clear, popup_area);
+
+    let block = Block::bordered()
+        .title(" Publish Message ")
+        .title_style(Style::default().fg(app.theme.accent).bold())
+        .border_style(Style::default().fg(app.theme.accent))
+        .style(Style::default().bg(app.theme.bg));
+    frame.render_widget(block, popup_area);
+
+    let inner = Rect::new(popup_area.x + 2, popup_area.y + 1, popup_area.width.saturating_sub(4), popup_area.height.saturating_sub(2));
+    let form = &app.publish_form;
+
+    // Routing key field
+    let fields = [
+        (0, "Routing Key", &form.routing_key),
+        (1, "Content Type", &form.content_type),
+    ];
+
+    let mut y = inner.y;
+    for (idx, label, value) in &fields {
+        let is_focused = form.focused_field == *idx;
+        let label_style = if is_focused { Style::default().fg(app.theme.accent) } else { Style::default().fg(app.theme.muted) };
+        let value_style = if is_focused { Style::default().fg(app.theme.white) } else { Style::default().fg(app.theme.primary) };
+
+        frame.render_widget(
+            Paragraph::new(Line::from(Span::styled(format!("{}:", label), label_style)))
+                .style(Style::default().bg(app.theme.bg)),
+            Rect::new(inner.x, y, inner.width, 1),
+        );
+        let display = if is_focused { format!("{}_", value) } else { value.to_string() };
+        frame.render_widget(
+            Paragraph::new(Line::from(Span::styled(display, value_style)))
+                .style(Style::default().bg(app.theme.bg)),
+            Rect::new(inner.x + 2, y + 1, inner.width.saturating_sub(2), 1),
+        );
+        y += 2;
+    }
+
+    // Body field (multi-line, takes remaining space)
+    let is_body_focused = form.focused_field == 2;
+    let body_label_style = if is_body_focused { Style::default().fg(app.theme.accent) } else { Style::default().fg(app.theme.muted) };
+    frame.render_widget(
+        Paragraph::new(Line::from(Span::styled("Body:", body_label_style)))
+            .style(Style::default().bg(app.theme.bg)),
+        Rect::new(inner.x, y, inner.width, 1),
+    );
+    y += 1;
+
+    let body_height = inner.height.saturating_sub(y - inner.y + 3); // leave room for footer
+    let body_area = Rect::new(inner.x + 1, y, inner.width.saturating_sub(1), body_height);
+    let body_style = if is_body_focused { Style::default().fg(app.theme.white) } else { Style::default().fg(app.theme.primary) };
+    let body_text = if is_body_focused { format!("{}_", form.body) } else { form.body.clone() };
+    let body_block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(if is_body_focused { Style::default().fg(app.theme.accent) } else { Style::default().fg(app.theme.divider) })
+        .style(Style::default().bg(app.theme.bg));
+    frame.render_widget(
+        Paragraph::new(body_text).style(body_style.bg(app.theme.bg)).block(body_block),
+        body_area,
+    );
+
+    // Error
+    if !form.error.is_empty() {
+        let err_y = inner.y + inner.height.saturating_sub(2);
+        frame.render_widget(
+            Paragraph::new(Span::styled(&form.error, Style::default().fg(app.theme.error)))
+                .style(Style::default().bg(app.theme.bg)),
+            Rect::new(inner.x, err_y, inner.width, 1),
+        );
+    }
+
+    // Footer
+    let footer_y = inner.y + inner.height.saturating_sub(1);
+    let ks = Style::default().fg(app.theme.accent).bold();
+    let ds = Style::default().fg(app.theme.muted);
+    let hint = if form.focused_field == 2 { "⏎:newline  ctrl+⏎:send" } else { "⏎:send" };
+    frame.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::styled("tab", ks), Span::styled(":next ", ds),
+            Span::styled(hint, Style::default().fg(app.theme.accent)),
+            Span::styled("  ", ds),
+            Span::styled("esc", ks), Span::styled(":cancel", ds),
+        ])).style(Style::default().bg(app.theme.bg)),
+        Rect::new(inner.x, footer_y, inner.width, 1),
+    );
+}
+
+fn draw_confirm(frame: &mut Frame, app: &App, title: &str, message: &str) {
+    let popup_area = centered_rect(40, 20, frame.area());
+    frame.render_widget(Clear, popup_area);
+
+    let queue_name = app.selected_queue().map(|q| q.name.as_str()).unwrap_or("?");
+    let full_msg = format!("{}\n\nQueue: {}", message, queue_name);
+
+    let block = Block::bordered()
+        .title(format!(" {} ", title))
+        .title_style(Style::default().fg(app.theme.error).bold())
+        .border_style(Style::default().fg(app.theme.error))
+        .style(Style::default().bg(app.theme.bg));
+
+    let ks = Style::default().fg(app.theme.accent).bold();
+    let ds = Style::default().fg(app.theme.muted);
+
+    let mut lines: Vec<Line> = vec![Line::from("")];
+    for l in full_msg.lines() {
+        lines.push(Line::from(Span::styled(format!("  {}", l), Style::default().fg(app.theme.primary))));
+    }
+    lines.push(Line::from(""));
+    lines.push(Line::from(vec![
+        Span::styled("  ", ds),
+        Span::styled("y", ks), Span::styled(":confirm  ", ds),
+        Span::styled("esc", ks), Span::styled(":cancel", ds),
+    ]));
+
+    frame.render_widget(
+        Paragraph::new(lines).block(block).style(Style::default().bg(app.theme.bg)),
+        popup_area,
+    );
+}
+
+fn draw_queue_picker(frame: &mut Frame, app: &mut App) {
+    let popup_area = centered_rect(50, 60, frame.area());
+    frame.render_widget(Clear, popup_area);
+
+    let op_label = match &app.popup {
+        Popup::QueuePicker(QueueOperation::Copy) => "Copy",
+        Popup::QueuePicker(QueueOperation::Move) => "Move",
+        _ => "Select",
+    };
+
+    let source = app.selected_queue().map(|q| q.name.clone()).unwrap_or_default();
+    let title = format!(" {} from '{}' to: ", op_label, source);
+
+    let block = Block::bordered()
+        .title(title)
+        .title_style(Style::default().fg(app.theme.accent).bold())
+        .border_style(Style::default().fg(app.theme.accent))
+        .style(Style::default().bg(app.theme.bg));
+
+    let filter = app.queue_picker_filter.to_lowercase();
+    let filtered: Vec<&str> = app.queues.iter()
+        .map(|q| q.name.as_str())
+        .filter(|name| filter.is_empty() || name.to_lowercase().contains(&filter))
+        .collect();
+
+    let items: Vec<ListItem> = filtered.iter().map(|&name| {
+        let is_source = name == source;
+        let st = if is_source {
+            Style::default().fg(app.theme.muted)
+        } else {
+            Style::default().fg(app.theme.primary)
+        };
+        let label = if is_source { format!("  {} (source)", name) } else { format!("  {}", name) };
+        ListItem::new(Line::from(Span::styled(label, st)))
+    }).collect();
+
+    let list = List::new(items)
+        .block(block)
+        .highlight_style(Style::default().bg(app.theme.selected_bg).fg(app.theme.white).add_modifier(Modifier::BOLD))
+        .highlight_symbol("▸ ")
+        .style(Style::default().bg(app.theme.bg));
+
+    frame.render_stateful_widget(list, popup_area, &mut app.popup_list_state);
+
+    // Filter bar at bottom
+    if app.queue_picker_filter_active || !app.queue_picker_filter.is_empty() {
+        let filter_y = popup_area.y + popup_area.height.saturating_sub(2);
+        let filter_text = if app.queue_picker_filter_active {
+            format!("/{}_", app.queue_picker_filter)
+        } else {
+            format!("/{}", app.queue_picker_filter)
+        };
+        frame.render_widget(
+            Paragraph::new(Span::styled(filter_text, Style::default().fg(app.theme.accent)))
+                .style(Style::default().bg(app.theme.bg)),
+            Rect::new(popup_area.x + 2, filter_y, popup_area.width.saturating_sub(4), 1),
+        );
+    }
+}
+
+fn draw_operation_progress(frame: &mut Frame, app: &App) {
+    let popup_area = centered_rect(40, 20, frame.area());
+    frame.render_widget(Clear, popup_area);
+
+    let (completed, total) = app.operation_progress;
+
+    let block = Block::bordered()
+        .title(" Operation in Progress ")
+        .title_style(Style::default().fg(app.theme.accent).bold())
+        .border_style(Style::default().fg(app.theme.accent))
+        .style(Style::default().bg(app.theme.bg));
+
+    let pct = if total > 0 { (completed as f64 / total as f64 * 100.0) as u16 } else { 0 };
+    let bar_width = popup_area.width.saturating_sub(8) as usize;
+    let filled = (bar_width * pct as usize) / 100;
+    let bar: String = format!("[{}{}]", "█".repeat(filled), "░".repeat(bar_width - filled));
+
+    let lines = vec![
+        Line::from(""),
+        Line::from(Span::styled(
+            format!("  {}/{} messages", completed, total),
+            Style::default().fg(app.theme.primary),
+        )),
+        Line::from(""),
+        Line::from(Span::styled(
+            format!("  {}", bar),
+            Style::default().fg(app.theme.accent),
+        )),
+        Line::from(""),
+        Line::from(Span::styled(
+            "  esc:cancel",
+            Style::default().fg(app.theme.muted),
+        )),
+    ];
+
+    frame.render_widget(
+        Paragraph::new(lines).block(block).style(Style::default().bg(app.theme.bg)),
+        popup_area,
+    );
 }

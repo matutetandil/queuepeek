@@ -19,6 +19,11 @@ pub enum BgResult {
         queue_name: String,
         result: Result<Vec<MessageInfo>, String>,
     },
+    Published(Result<(), String>),
+    Purged(Result<(), String>),
+    Deleted(Result<(), String>),
+    OperationProgress { completed: usize, total: usize },
+    OperationComplete(Result<String, String>),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -38,6 +43,17 @@ pub enum Popup {
     FetchCount,
     ThemePicker,
     BackendTypePicker,
+    PublishMessage,
+    ConfirmPurge,
+    ConfirmDelete,
+    QueuePicker(QueueOperation),
+    OperationProgress,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum QueueOperation {
+    Move,
+    Copy,
 }
 
 pub const FETCH_PRESETS: &[u32] = &[10, 25, 50, 100, 250, 500];
@@ -101,11 +117,78 @@ pub struct App {
     pub bg_sender: mpsc::Sender<BgResult>,
     pub bg_receiver: mpsc::Receiver<BgResult>,
 
+    // Publish
+    pub publish_form: PublishForm,
+
+    // Move/Copy operations
+    pub operation_progress: (usize, usize),
+    pub operation_cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
+
+    // Queue picker filter
+    pub queue_picker_filter: String,
+    pub queue_picker_filter_active: bool,
+
     // Auto-update
     pub update_checker: UpdateChecker,
 }
 
 pub const BACKEND_TYPES: &[&str] = &["rabbitmq", "kafka", "mqtt"];
+
+#[derive(Debug, Clone, Default)]
+pub struct PublishForm {
+    pub routing_key: String,
+    pub content_type: String,
+    pub body: String,
+    pub focused_field: usize, // 0=routing_key, 1=content_type, 2=body
+    pub error: String,
+}
+
+impl PublishForm {
+    pub fn new_for_queue(queue_name: &str) -> Self {
+        Self {
+            routing_key: queue_name.to_string(),
+            content_type: "application/json".to_string(),
+            body: String::new(),
+            focused_field: 2, // Focus body by default
+            error: String::new(),
+        }
+    }
+
+    pub fn field_count() -> usize { 3 }
+
+    pub fn field_label(idx: usize) -> &'static str {
+        match idx {
+            0 => "Routing Key",
+            1 => "Content Type",
+            2 => "Body",
+            _ => "",
+        }
+    }
+
+    pub fn push_char(&mut self, c: char) {
+        match self.focused_field {
+            0 => self.routing_key.push(c),
+            1 => self.content_type.push(c),
+            2 => self.body.push(c),
+            _ => {}
+        }
+    }
+
+    pub fn pop_char(&mut self) {
+        match self.focused_field {
+            0 => { self.routing_key.pop(); }
+            1 => { self.content_type.pop(); }
+            2 => { self.body.pop(); }
+            _ => {}
+        }
+    }
+
+    pub fn newline(&mut self) {
+        if self.focused_field == 2 {
+            self.body.push('\n');
+        }
+    }
+}
 
 #[derive(Debug, Clone, Default)]
 pub struct ProfileForm {
@@ -338,6 +421,11 @@ impl App {
             popup_list_state: ListState::default(),
             bg_sender: tx,
             bg_receiver: rx,
+            publish_form: PublishForm::default(),
+            operation_progress: (0, 0),
+            operation_cancel: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            queue_picker_filter: String::new(),
+            queue_picker_filter_active: false,
             update_checker: UpdateChecker::new(),
         }
     }
@@ -425,6 +513,110 @@ impl App {
             std::thread::spawn(move || {
                 let result = backend.peek_messages(&namespace, &queue_name, count);
                 let _ = tx.send(BgResult::Messages { queue_name, result });
+            });
+        }
+    }
+
+    pub fn do_publish(&self) {
+        if let Some(ref backend) = self.backend {
+            let backend = backend.clone_backend();
+            let namespace = self.selected_namespace.clone();
+            let queue = self.current_queue_name.clone();
+            let routing_key = self.publish_form.routing_key.clone();
+            let body = self.publish_form.body.clone();
+            let content_type = self.publish_form.content_type.clone();
+            let tx = self.bg_sender.clone();
+            std::thread::spawn(move || {
+                let result = backend.publish_message(&namespace, &queue, &body, &routing_key, &[], &content_type);
+                let _ = tx.send(BgResult::Published(result));
+            });
+        }
+    }
+
+    pub fn do_purge(&self, queue: &str) {
+        if let Some(ref backend) = self.backend {
+            let backend = backend.clone_backend();
+            let namespace = self.selected_namespace.clone();
+            let queue = queue.to_string();
+            let tx = self.bg_sender.clone();
+            std::thread::spawn(move || {
+                let result = backend.purge_queue(&namespace, &queue);
+                let _ = tx.send(BgResult::Purged(result));
+            });
+        }
+    }
+
+    pub fn do_delete(&self, queue: &str) {
+        if let Some(ref backend) = self.backend {
+            let backend = backend.clone_backend();
+            let namespace = self.selected_namespace.clone();
+            let queue = queue.to_string();
+            let tx = self.bg_sender.clone();
+            std::thread::spawn(move || {
+                let result = backend.delete_queue(&namespace, &queue);
+                let _ = tx.send(BgResult::Deleted(result));
+            });
+        }
+    }
+
+    pub fn do_copy_or_move(&mut self, source: &str, dest: &str, operation: QueueOperation) {
+        if let Some(ref backend) = self.backend {
+            let backend = backend.clone_backend();
+            let namespace = self.selected_namespace.clone();
+            let source = source.to_string();
+            let dest = dest.to_string();
+            let fetch_count = self.fetch_count;
+            let tx = self.bg_sender.clone();
+            let cancel = self.operation_cancel.clone();
+            cancel.store(false, std::sync::atomic::Ordering::Relaxed);
+            self.operation_progress = (0, 0);
+            self.popup = Popup::OperationProgress;
+
+            std::thread::spawn(move || {
+                // Step 1: get messages from source
+                let messages = if operation == QueueOperation::Copy {
+                    backend.peek_messages(&namespace, &source, fetch_count)
+                } else {
+                    backend.consume_messages(&namespace, &source, fetch_count)
+                };
+
+                let messages = match messages {
+                    Ok(m) => m,
+                    Err(e) => {
+                        let _ = tx.send(BgResult::OperationComplete(Err(e)));
+                        return;
+                    }
+                };
+
+                let total = messages.len();
+                let _ = tx.send(BgResult::OperationProgress { completed: 0, total });
+
+                // Step 2: publish each message to destination
+                for (i, msg) in messages.iter().enumerate() {
+                    if cancel.load(std::sync::atomic::Ordering::Relaxed) {
+                        let _ = tx.send(BgResult::OperationComplete(
+                            Ok(format!("Cancelled after {}/{} messages", i, total))
+                        ));
+                        return;
+                    }
+
+                    let headers: Vec<(String, String)> = msg.headers.clone();
+                    if let Err(e) = backend.publish_message(
+                        &namespace, &dest, &msg.body, &msg.routing_key, &headers, &msg.content_type,
+                    ) {
+                        let _ = tx.send(BgResult::OperationComplete(
+                            Err(format!("Failed at message {}/{}: {}", i + 1, total, e))
+                        ));
+                        return;
+                    }
+
+                    let _ = tx.send(BgResult::OperationProgress { completed: i + 1, total });
+                }
+
+                let op_name = if operation == QueueOperation::Copy { "Copied" } else { "Moved" };
+                let _ = tx.send(BgResult::OperationComplete(
+                    Ok(format!("{} {} messages from {} to {}", op_name, total, source, dest))
+                ));
             });
         }
     }
@@ -539,6 +731,46 @@ impl App {
                             self.set_status(format!("Error: {}", e), true);
                         }
                     }
+                }
+                BgResult::Published(Ok(())) => {
+                    self.set_status("Message published", false);
+                    self.popup = Popup::None;
+                    if self.screen == Screen::MessageList {
+                        self.loading = true;
+                        self.load_messages();
+                    }
+                }
+                BgResult::Published(Err(e)) => {
+                    self.publish_form.error = format!("Publish failed: {}", e);
+                }
+                BgResult::Purged(Ok(())) => {
+                    self.set_status("Queue purged", false);
+                    self.loading = true;
+                    self.load_queues();
+                }
+                BgResult::Purged(Err(e)) => {
+                    self.set_status(format!("Purge failed: {}", e), true);
+                }
+                BgResult::Deleted(Ok(())) => {
+                    self.set_status("Queue deleted", false);
+                    self.loading = true;
+                    self.load_queues();
+                }
+                BgResult::Deleted(Err(e)) => {
+                    self.set_status(format!("Delete failed: {}", e), true);
+                }
+                BgResult::OperationProgress { completed, total } => {
+                    self.operation_progress = (completed, total);
+                }
+                BgResult::OperationComplete(Ok(msg)) => {
+                    self.popup = Popup::None;
+                    self.set_status(msg, false);
+                    self.loading = true;
+                    self.load_queues();
+                }
+                BgResult::OperationComplete(Err(e)) => {
+                    self.popup = Popup::None;
+                    self.set_status(e, true);
                 }
             }
         }
