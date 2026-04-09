@@ -58,14 +58,18 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App)
             app.update_checker.start_check();
         }
 
-        // Auto-refresh queues every 5 seconds when on QueueList screen
-        if app.screen == Screen::QueueList && !app.loading && last_refresh.elapsed() >= Duration::from_secs(5) {
-            app.load_queues();
-            // Also refresh queue info popup if open
-            if app.popup == Popup::QueueInfo && !app.queue_info_name.is_empty() {
-                app.load_queue_detail(&app.queue_info_name.clone());
+        // Auto-refresh every 5 seconds
+        if !app.loading && last_refresh.elapsed() >= Duration::from_secs(5) {
+            if app.screen == Screen::QueueList {
+                app.load_queues();
+                if app.popup == Popup::QueueInfo && !app.queue_info_name.is_empty() {
+                    app.load_queue_detail(&app.queue_info_name.clone());
+                }
+                last_refresh = Instant::now();
+            } else if app.screen == Screen::MessageList && app.message_auto_refresh {
+                app.load_messages();
+                last_refresh = Instant::now();
             }
-            last_refresh = Instant::now();
         }
 
         terminal.draw(|frame| ui::draw(frame, app))?;
@@ -409,6 +413,17 @@ fn handle_queue_list_key(app: &mut App, code: KeyCode, modifiers: KeyModifiers) 
                 app.popup_list_state.select(Some(0));
             }
         }
+        KeyCode::Char('G') => {
+            // Show consumer groups for selected queue
+            if let Some(q) = app.selected_queue() {
+                let name = q.name.clone();
+                app.consumer_groups.clear();
+                app.consumer_groups_scroll = 0;
+                app.popup = Popup::ConsumerGroups;
+                app.loading = true;
+                app.load_consumer_groups(&name);
+            }
+        }
         KeyCode::Char('i') => {
             // Show queue info/detail
             if let Some(q) = app.selected_queue() {
@@ -617,6 +632,30 @@ fn handle_message_list_key(app: &mut App, code: KeyCode, modifiers: KeyModifiers
             app.import_file_path = "./".to_string();
             app.popup = Popup::ImportFile;
         }
+        KeyCode::Char('T') => {
+            // Toggle auto-refresh (tail mode)
+            app.message_auto_refresh = !app.message_auto_refresh;
+            if app.message_auto_refresh {
+                app.set_status("Auto-refresh ON (every 5s)", false);
+            } else {
+                app.set_status("Auto-refresh OFF", false);
+            }
+        }
+        KeyCode::Char('r') => {
+            // Manual refresh
+            app.loading = true;
+            app.load_messages();
+            app.set_status("Refreshing messages...", false);
+        }
+        KeyCode::Char('L') => {
+            // DLQ re-route: parse x-death and offer to re-route
+            if let Some((exchange, routing_key)) = app.parse_dlq_info() {
+                let count = app.selection_count().max(1);
+                app.popup = Popup::ConfirmReroute { exchange, routing_key, count };
+            } else {
+                app.set_status("No x-death header found — not a dead-lettered message", true);
+            }
+        }
         KeyCode::Esc => {
             if !app.selected_messages.is_empty() {
                 // First Esc clears selection
@@ -626,6 +665,7 @@ fn handle_message_list_key(app: &mut App, code: KeyCode, modifiers: KeyModifiers
                 app.messages.clear();
                 app.message_filter.clear();
                 app.message_filter_active = false;
+                app.message_auto_refresh = false;
             }
         }
         _ => {}
@@ -742,6 +782,32 @@ fn handle_message_detail_key(app: &mut App, code: KeyCode, modifiers: KeyModifie
                     Ok(()) => app.set_status("Headers copied to clipboard", false),
                     Err(e) => app.set_status(e, true),
                 }
+            }
+        }
+        KeyCode::Char('L') => {
+            // DLQ re-route from detail view
+            if let Some(msg) = app.messages.get(app.detail_message_idx) {
+                let dlq_info = msg.headers.iter()
+                    .find(|(k, _)| k == "x-death")
+                    .and_then(|(_, v)| crate::app::parse_x_death_value(v));
+                if let Some((exchange, routing_key)) = dlq_info {
+                    app.popup = Popup::ConfirmReroute { exchange, routing_key, count: 1 };
+                } else {
+                    app.set_status("No x-death header found — not a dead-lettered message", true);
+                }
+            }
+        }
+        KeyCode::Char('E') => {
+            // Edit & re-publish current message
+            if let Some(msg) = app.messages.get(app.detail_message_idx) {
+                app.publish_form = app::PublishForm {
+                    routing_key: msg.routing_key.clone(),
+                    content_type: if msg.content_type.is_empty() { "application/json".to_string() } else { msg.content_type.clone() },
+                    body: msg.body.clone(),
+                    focused_field: 2, // Focus body by default
+                    error: String::new(),
+                };
+                app.popup = Popup::EditMessage;
             }
         }
         KeyCode::Esc => {
@@ -916,6 +982,40 @@ fn handle_popup_key(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
                         app.publish_form.newline();
                     } else if modifiers.contains(KeyModifiers::CONTROL) || app.publish_form.focused_field != 2 {
                         // Ctrl+Enter or Enter on non-body field: submit
+                        if app.publish_form.body.is_empty() {
+                            app.publish_form.error = "Body is required".into();
+                        } else {
+                            app.publish_form.error.clear();
+                            app.do_publish();
+                        }
+                    }
+                }
+                KeyCode::Backspace => {
+                    app.publish_form.pop_char();
+                }
+                KeyCode::Char(c) => {
+                    app.publish_form.push_char(c);
+                }
+                _ => {}
+            }
+        }
+        Popup::EditMessage => {
+            match code {
+                KeyCode::Esc => {
+                    app.popup = Popup::None;
+                    app.publish_form.error.clear();
+                }
+                KeyCode::Tab | KeyCode::Down => {
+                    app.publish_form.focused_field = (app.publish_form.focused_field + 1) % app::PublishForm::field_count();
+                }
+                KeyCode::BackTab | KeyCode::Up => {
+                    let count = app::PublishForm::field_count();
+                    app.publish_form.focused_field = (app.publish_form.focused_field + count - 1) % count;
+                }
+                KeyCode::Enter => {
+                    if app.publish_form.focused_field == 2 {
+                        app.publish_form.newline();
+                    } else if modifiers.contains(KeyModifiers::CONTROL) || app.publish_form.focused_field != 2 {
                         if app.publish_form.body.is_empty() {
                             app.publish_form.error = "Body is required".into();
                         } else {
@@ -1118,6 +1218,39 @@ fn handle_popup_key(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
         }
         Popup::ExportMessages => {
             app.popup = Popup::None;
+        }
+        Popup::ConsumerGroups => {
+            match code {
+                KeyCode::Char('j') | KeyCode::Down => {
+                    app.consumer_groups_scroll = app.consumer_groups_scroll.saturating_add(1);
+                }
+                KeyCode::Char('k') | KeyCode::Up => {
+                    app.consumer_groups_scroll = app.consumer_groups_scroll.saturating_sub(1);
+                }
+                KeyCode::PageDown => {
+                    app.consumer_groups_scroll = app.consumer_groups_scroll.saturating_add(10);
+                }
+                KeyCode::PageUp => {
+                    app.consumer_groups_scroll = app.consumer_groups_scroll.saturating_sub(10);
+                }
+                KeyCode::Esc | KeyCode::Char('G') => {
+                    app.popup = Popup::None;
+                }
+                _ => {}
+            }
+        }
+        Popup::ConfirmReroute { .. } => {
+            match code {
+                KeyCode::Char('y') | KeyCode::Char('Y') => {
+                    if let Popup::ConfirmReroute { exchange, routing_key, .. } = app.popup.clone() {
+                        app.popup = Popup::None;
+                        app.do_reroute_messages(&exchange, &routing_key);
+                    }
+                }
+                _ => {
+                    app.popup = Popup::None;
+                }
+            }
         }
         Popup::QueueInfo => {
             match code {

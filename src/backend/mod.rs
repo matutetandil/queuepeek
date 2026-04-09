@@ -57,6 +57,25 @@ impl DetailEntry {
     }
 }
 
+/// Consumer group info for a topic
+#[derive(Debug, Clone)]
+pub struct ConsumerGroupInfo {
+    pub name: String,
+    pub state: String,
+    pub members: u32,
+    pub total_lag: i64,
+    pub partitions: Vec<ConsumerGroupPartition>,
+}
+
+/// Per-partition consumer group offset and lag
+#[derive(Debug, Clone)]
+pub struct ConsumerGroupPartition {
+    pub partition: i32,
+    pub current_offset: i64,
+    pub high_watermark: i64,
+    pub lag: i64,
+}
+
 /// Generic backend trait — implement for each broker type
 pub trait Backend: Send {
     fn backend_type(&self) -> &str;
@@ -92,6 +111,24 @@ pub trait Backend: Send {
     /// Consume messages destructively (ack without requeue)
     fn consume_messages(&self, _namespace: &str, _queue: &str, _count: u32) -> Result<Vec<MessageInfo>, String> {
         Err("Consume not supported by this backend".into())
+    }
+
+    /// Publish a message to a specific exchange (for DLQ re-routing)
+    fn publish_to_exchange(
+        &self,
+        _namespace: &str,
+        _exchange: &str,
+        _body: &str,
+        _routing_key: &str,
+        _headers: &[(String, String)],
+        _content_type: &str,
+    ) -> Result<(), String> {
+        Err("Publish to exchange not supported by this backend".into())
+    }
+
+    /// List consumer groups for a queue/topic
+    fn consumer_groups(&self, _namespace: &str, _queue: &str) -> Result<Vec<ConsumerGroupInfo>, String> {
+        Err("Consumer groups not supported by this backend".into())
     }
 
     /// Get detailed queue/topic information as structured sections

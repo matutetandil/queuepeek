@@ -2,6 +2,7 @@ use ratatui::prelude::*;
 use ratatui::widgets::*;
 
 use crate::app::App;
+use crate::ui::theme::Theme;
 
 pub fn draw(frame: &mut Frame, app: &mut App) {
     let area = frame.area();
@@ -130,11 +131,16 @@ fn draw_content(frame: &mut Frame, app: &App, area: Rect) {
     let headers_paragraph = Paragraph::new(header_lines).block(headers_block);
     frame.render_widget(headers_paragraph, content_chunks[0]);
 
-    // Payload block — auto-detect format and pretty-print
-    let (payload_body, format_label) = if app.detail_pretty {
-        pretty_format(&msg.body)
+    // Payload block — auto-detect format and pretty-print with syntax highlighting
+    let (payload_text, format_label) = if app.detail_pretty {
+        let (formatted, label) = pretty_format(&msg.body);
+        match label {
+            "json" => (highlight_json(&formatted, app.theme), label),
+            "xml" => (highlight_xml(&formatted, app.theme), label),
+            _ => (Text::styled(formatted, Style::default().fg(app.theme.primary)), label),
+        }
     } else {
-        (msg.body.clone(), "raw")
+        (Text::styled(msg.body.clone(), Style::default().fg(app.theme.primary)), "raw")
     };
 
     let pretty_indicator = format!("[{}]", format_label);
@@ -145,8 +151,8 @@ fn draw_content(frame: &mut Frame, app: &App, area: Rect) {
         .border_style(Style::default().fg(app.theme.divider))
         .style(Style::default().bg(app.theme.bg));
 
-    let payload_paragraph = Paragraph::new(payload_body)
-        .style(Style::default().fg(app.theme.primary).bg(app.theme.bg))
+    let payload_paragraph = Paragraph::new(payload_text)
+        .style(Style::default().bg(app.theme.bg))
         .block(payload_block)
         .wrap(Wrap { trim: false })
         .scroll((app.detail_scroll, 0));
@@ -263,6 +269,143 @@ fn pretty_xml(xml: &str) -> String {
     result
 }
 
+/// Syntax-highlight JSON text into colored spans
+fn highlight_json(text: &str, theme: &Theme) -> Text<'static> {
+    let key_style = Style::default().fg(theme.accent);
+    let string_style = Style::default().fg(theme.success);
+    let number_style = Style::default().fg(theme.primary).bold();
+    let punct_style = Style::default().fg(theme.muted);
+
+    let mut lines: Vec<Line<'static>> = Vec::new();
+
+    for line_str in text.lines() {
+        let mut spans: Vec<Span<'static>> = Vec::new();
+        let chars: Vec<char> = line_str.chars().collect();
+        let len = chars.len();
+        let mut i = 0;
+
+        while i < len {
+            let ch = chars[i];
+            match ch {
+                '"' => {
+                    // Collect the full string (including quotes)
+                    let mut s = String::new();
+                    s.push('"');
+                    i += 1;
+                    while i < len {
+                        let c = chars[i];
+                        s.push(c);
+                        if c == '\\' && i + 1 < len {
+                            i += 1;
+                            s.push(chars[i]);
+                        } else if c == '"' {
+                            break;
+                        }
+                        i += 1;
+                    }
+                    i += 1;
+
+                    // Check if followed by ':' (it's a key)
+                    let mut j = i;
+                    while j < len && chars[j] == ' ' { j += 1; }
+                    let is_key = j < len && chars[j] == ':';
+
+                    if is_key {
+                        spans.push(Span::styled(s, key_style));
+                    } else {
+                        spans.push(Span::styled(s, string_style));
+                    }
+                }
+                '{' | '}' | '[' | ']' | ':' | ',' => {
+                    spans.push(Span::styled(ch.to_string(), punct_style));
+                    i += 1;
+                }
+                ' ' | '\t' => {
+                    let mut ws = String::new();
+                    while i < len && (chars[i] == ' ' || chars[i] == '\t') {
+                        ws.push(chars[i]);
+                        i += 1;
+                    }
+                    spans.push(Span::raw(ws));
+                }
+                _ => {
+                    // Numbers, bools, null
+                    let mut token = String::new();
+                    while i < len && !matches!(chars[i], ',' | '}' | ']' | ' ' | '\t' | '\n') {
+                        token.push(chars[i]);
+                        i += 1;
+                    }
+                    spans.push(Span::styled(token, number_style));
+                }
+            }
+        }
+
+        lines.push(Line::from(spans));
+    }
+
+    Text::from(lines)
+}
+
+/// Syntax-highlight XML text into colored spans
+fn highlight_xml(text: &str, theme: &Theme) -> Text<'static> {
+    let tag_style = Style::default().fg(theme.accent);
+    let attr_style = Style::default().fg(theme.muted);
+    let text_style = Style::default().fg(theme.primary);
+    let punct_style = Style::default().fg(theme.accent).bold();
+
+    let mut lines: Vec<Line<'static>> = Vec::new();
+
+    for line_str in text.lines() {
+        let mut spans: Vec<Span<'static>> = Vec::new();
+        let chars: Vec<char> = line_str.chars().collect();
+        let len = chars.len();
+        let mut i = 0;
+
+        while i < len {
+            if chars[i] == '<' {
+                // Collect entire tag
+                let mut tag = String::new();
+                while i < len {
+                    tag.push(chars[i]);
+                    if chars[i] == '>' { i += 1; break; }
+                    i += 1;
+                }
+
+                // Split tag into name and attributes
+                let inner = tag.trim_start_matches('<').trim_end_matches('>').trim_end_matches('/');
+                let parts: Vec<&str> = inner.splitn(2, char::is_whitespace).collect();
+
+                spans.push(Span::styled("<".to_string(), punct_style));
+                if let Some(name) = parts.first() {
+                    spans.push(Span::styled(name.to_string(), tag_style));
+                }
+                if parts.len() > 1 {
+                    spans.push(Span::styled(format!(" {}", parts[1]), attr_style));
+                }
+                if tag.ends_with("/>") {
+                    spans.push(Span::styled("/>".to_string(), punct_style));
+                } else {
+                    spans.push(Span::styled(">".to_string(), punct_style));
+                }
+            } else {
+                // Text content
+                let mut content = String::new();
+                while i < len && chars[i] != '<' {
+                    content.push(chars[i]);
+                    i += 1;
+                }
+                if !content.is_empty() {
+                    spans.push(Span::styled(content, text_style));
+                }
+            }
+        }
+
+        lines.push(Line::from(spans));
+    }
+
+    Text::from(lines)
+}
+
 fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
     let ks = Style::default().fg(app.theme.accent).bg(app.theme.sidebar_bg);
     let ds = Style::default().fg(app.theme.muted).bg(app.theme.sidebar_bg);
@@ -271,6 +414,8 @@ fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
         Span::styled("p", ks), Span::styled(":pretty ", ds),
         Span::styled("c", ks), Span::styled(":copy payload ", ds),
         Span::styled("h", ks), Span::styled(":copy headers ", ds),
+        Span::styled("E", ks), Span::styled(":edit ", ds),
+        Span::styled("L", ks), Span::styled(":reroute ", ds),
         Span::styled("esc", ks), Span::styled(":back ", ds),
         Span::styled("q", ks), Span::styled(":quit", ds),
     ];

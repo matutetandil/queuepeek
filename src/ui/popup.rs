@@ -11,7 +11,8 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         Popup::FetchCount => draw_fetch_count(frame, app),
         Popup::ThemePicker => draw_theme_picker(frame, app),
         Popup::BackendTypePicker => draw_backend_type_picker(frame, app),
-        Popup::PublishMessage => draw_publish(frame, app),
+        Popup::PublishMessage => draw_publish(frame, app, " Publish Message "),
+        Popup::EditMessage => draw_publish(frame, app, " Edit & Re-publish "),
         Popup::ConfirmPurge => draw_confirm(frame, app, "Purge Queue", "Purge all messages from this queue?"),
         Popup::ConfirmDelete => draw_confirm(frame, app, "Delete Queue", "Delete this queue permanently?"),
         Popup::QueuePicker(_) => draw_queue_picker(frame, app),
@@ -25,6 +26,16 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         Popup::ExportMessages => {}
         Popup::ImportFile => draw_import_file(frame, app),
         Popup::QueueInfo => draw_queue_info(frame, app),
+        Popup::ConsumerGroups => draw_consumer_groups(frame, app),
+        Popup::ConfirmReroute { ref exchange, ref routing_key, count } => {
+            let msg = format!(
+                "Re-route {} message(s) to:\n\n  Exchange:    {}\n  Routing Key: {}\n\nThis will publish to the original exchange.\nThe messages remain in the current queue.",
+                count,
+                if exchange.is_empty() { "(default)" } else { exchange },
+                if routing_key.is_empty() { "(empty)" } else { routing_key },
+            );
+            draw_confirm(frame, app, "DLQ Re-route", &msg);
+        }
         Popup::None => {}
     }
 }
@@ -67,6 +78,7 @@ fn draw_help(frame: &mut Frame, app: &App) {
         ("x", "Purge queue"),
         ("D", "Delete queue"),
         ("i", "Queue info (stats, config)"),
+        ("G", "Consumer groups (Kafka)"),
         ("C", "Copy messages to queue"),
         ("m", "Move messages to queue"),
         ("spc", "Select message (list)"),
@@ -75,6 +87,10 @@ fn draw_help(frame: &mut Frame, app: &App) {
         ("R", "Re-publish selected"),
         ("W", "Dump queue to JSONL"),
         ("I", "Import from JSONL/JSON"),
+        ("L", "DLQ re-route (x-death)"),
+        ("T", "Toggle tail / auto-refresh"),
+        ("r", "Refresh messages"),
+        ("E", "Edit & re-publish (detail)"),
         ("esc", "Go back"),
         ("?", "Toggle help"),
         ("q", "Quit"),
@@ -265,12 +281,12 @@ fn draw_backend_type_picker(frame: &mut Frame, app: &mut App) {
     frame.render_stateful_widget(list, popup_area, &mut app.popup_list_state);
 }
 
-fn draw_publish(frame: &mut Frame, app: &mut App) {
+fn draw_publish(frame: &mut Frame, app: &mut App, title: &str) {
     let popup_area = centered_rect(60, 70, frame.area());
     frame.render_widget(Clear, popup_area);
 
     let block = Block::bordered()
-        .title(" Publish Message ")
+        .title(title)
         .title_style(Style::default().fg(app.theme.accent).bold())
         .border_style(Style::default().fg(app.theme.accent))
         .style(Style::default().bg(app.theme.bg));
@@ -613,6 +629,106 @@ fn draw_queue_info(frame: &mut Frame, app: &App) {
 
     // Apply scroll
     let scroll = app.queue_info_scroll;
+    let content = Paragraph::new(lines)
+        .style(Style::default().bg(app.theme.bg))
+        .scroll((scroll, 0));
+    frame.render_widget(content, inner);
+}
+
+fn draw_consumer_groups(frame: &mut Frame, app: &App) {
+    let popup_area = centered_rect(70, 75, frame.area());
+    frame.render_widget(Clear, popup_area);
+
+    let block = Block::bordered()
+        .title(" Consumer Groups ")
+        .title_style(Style::default().fg(app.theme.accent).bold())
+        .border_style(Style::default().fg(app.theme.accent))
+        .style(Style::default().bg(app.theme.bg));
+
+    let inner = block.inner(popup_area);
+    frame.render_widget(block, popup_area);
+
+    if app.consumer_groups.is_empty() && app.loading {
+        let loading = Paragraph::new(Line::from(Span::styled(
+            "  Loading...",
+            Style::default().fg(app.theme.muted),
+        ))).style(Style::default().bg(app.theme.bg));
+        frame.render_widget(loading, inner);
+        return;
+    }
+
+    if app.consumer_groups.is_empty() {
+        let empty = Paragraph::new(Line::from(Span::styled(
+            "  No consumer groups found for this topic",
+            Style::default().fg(app.theme.muted),
+        ))).style(Style::default().bg(app.theme.bg));
+        frame.render_widget(empty, inner);
+        return;
+    }
+
+    let mut lines: Vec<Line> = Vec::new();
+    let name_style = Style::default().fg(app.theme.accent).bold();
+    let key_style = Style::default().fg(app.theme.muted);
+    let value_style = Style::default().fg(app.theme.primary);
+    let lag_warn_style = Style::default().fg(app.theme.error).bold();
+    let lag_ok_style = Style::default().fg(app.theme.success);
+
+    for group in &app.consumer_groups {
+        if !lines.is_empty() {
+            lines.push(Line::from(""));
+        }
+
+        // Group header
+        let state_style = if group.state == "Stable" {
+            Style::default().fg(app.theme.success)
+        } else {
+            Style::default().fg(app.theme.muted)
+        };
+
+        lines.push(Line::from(vec![
+            Span::styled(format!("  {} ", group.name), name_style),
+            Span::styled(format!("({})", group.state), state_style),
+        ]));
+
+        lines.push(Line::from(vec![
+            Span::styled("    Members: ", key_style),
+            Span::styled(group.members.to_string(), value_style),
+            Span::styled("  Total lag: ", key_style),
+            Span::styled(
+                group.total_lag.to_string(),
+                if group.total_lag > 0 { lag_warn_style } else { lag_ok_style },
+            ),
+        ]));
+
+        // Per-partition details
+        if !group.partitions.is_empty() {
+            lines.push(Line::from(Span::styled(
+                "    Partition   Offset        High WM       Lag",
+                key_style,
+            )));
+
+            for p in &group.partitions {
+                let lag_style = if p.lag > 0 { lag_warn_style } else { lag_ok_style };
+                lines.push(Line::from(vec![
+                    Span::styled(format!("    P{:<10}", p.partition), value_style),
+                    Span::styled(format!("{:<14}", p.current_offset), value_style),
+                    Span::styled(format!("{:<14}", p.high_watermark), value_style),
+                    Span::styled(format!("{}", p.lag), lag_style),
+                ]));
+            }
+        }
+    }
+
+    // Footer
+    lines.push(Line::from(""));
+    lines.push(Line::from(vec![
+        Span::styled("  j/k", Style::default().fg(app.theme.accent).bold()),
+        Span::styled(":scroll  ", Style::default().fg(app.theme.muted)),
+        Span::styled("esc", Style::default().fg(app.theme.accent).bold()),
+        Span::styled(":close", Style::default().fg(app.theme.muted)),
+    ]));
+
+    let scroll = app.consumer_groups_scroll;
     let content = Paragraph::new(lines)
         .style(Style::default().bg(app.theme.bg))
         .scroll((scroll, 0));

@@ -294,6 +294,43 @@ impl Backend for RabbitMqBackend {
         Ok(())
     }
 
+    fn publish_to_exchange(
+        &self,
+        namespace: &str,
+        exchange: &str,
+        body: &str,
+        routing_key: &str,
+        headers: &[(String, String)],
+        content_type: &str,
+    ) -> Result<(), String> {
+        let encoded_ns = urlencoding::encode(namespace);
+        let encoded_ex = urlencoding::encode(exchange);
+        let path = format!("/api/exchanges/{}/{}/publish", encoded_ns, encoded_ex);
+
+        let props_headers = if headers.is_empty() {
+            None
+        } else {
+            let map: serde_json::Map<String, serde_json::Value> = headers
+                .iter()
+                .map(|(k, v)| (k.clone(), serde_json::Value::String(v.clone())))
+                .collect();
+            Some(serde_json::Value::Object(map))
+        };
+
+        let req = PublishRequest {
+            properties: PublishProperties {
+                content_type: if content_type.is_empty() { None } else { Some(content_type.to_string()) },
+                headers: props_headers,
+            },
+            routing_key: routing_key.to_string(),
+            payload: body.to_string(),
+            payload_encoding: "string".to_string(),
+        };
+
+        self.post_json(&path, &req)?;
+        Ok(())
+    }
+
     fn delete_queue(&self, namespace: &str, queue: &str) -> Result<(), String> {
         let encoded_ns = urlencoding::encode(namespace);
         let encoded_q = urlencoding::encode(queue);

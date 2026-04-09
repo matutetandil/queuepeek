@@ -5,7 +5,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use ratatui::widgets::ListState;
 
 use crate::config::{Config, Profile};
-use crate::backend::{Backend, BrokerInfo, DetailSection, QueueInfo, MessageInfo};
+use crate::backend::{Backend, BrokerInfo, ConsumerGroupInfo, DetailSection, QueueInfo, MessageInfo};
 use crate::ui::theme::{get_theme, Theme};
 use crate::updater::UpdateChecker;
 
@@ -27,6 +27,7 @@ pub enum BgResult {
     OperationProgress { completed: usize, total: usize },
     OperationComplete(Result<String, String>),
     QueueDetail(Result<Vec<DetailSection>, String>),
+    ConsumerGroups(Result<Vec<ConsumerGroupInfo>, String>),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -56,6 +57,9 @@ pub enum Popup {
     ExportMessages,
     ImportFile,
     QueueInfo,
+    EditMessage,
+    ConfirmReroute { exchange: String, routing_key: String, count: usize },
+    ConsumerGroups,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -142,10 +146,17 @@ pub struct App {
     // Import
     pub import_file_path: String,
 
+    // Message auto-refresh (tail mode)
+    pub message_auto_refresh: bool,
+
     // Queue info popup
     pub queue_detail: Vec<DetailSection>,
     pub queue_info_scroll: u16,
     pub queue_info_name: String,
+
+    // Consumer groups popup
+    pub consumer_groups: Vec<ConsumerGroupInfo>,
+    pub consumer_groups_scroll: u16,
 
     // Auto-update
     pub update_checker: UpdateChecker,
@@ -447,9 +458,12 @@ impl App {
             queue_picker_filter: String::new(),
             queue_picker_filter_active: false,
             import_file_path: String::new(),
+            message_auto_refresh: false,
             queue_detail: Vec::new(),
             queue_info_scroll: 0,
             queue_info_name: String::new(),
+            consumer_groups: Vec::new(),
+            consumer_groups_scroll: 0,
             update_checker: UpdateChecker::new(),
         }
     }
@@ -960,6 +974,75 @@ impl App {
         }
     }
 
+    /// Parse x-death header to extract original exchange and routing key
+    pub fn parse_dlq_info(&self) -> Option<(String, String)> {
+        let messages = self.get_target_messages();
+        if messages.is_empty() { return None; }
+
+        // Check first message for x-death header
+        for (key, value) in &messages[0].headers {
+            if key == "x-death" {
+                return parse_x_death_value(value);
+            }
+        }
+        None
+    }
+
+    /// Re-route selected messages to their original exchange/routing key
+    pub fn do_reroute_messages(&mut self, exchange: &str, routing_key: &str) {
+        if let Some(ref backend) = self.backend {
+            let messages = self.get_target_messages();
+            if messages.is_empty() { return; }
+
+            let backend = backend.clone_backend();
+            let namespace = self.selected_namespace.clone();
+            let exchange = exchange.to_string();
+            let routing_key = routing_key.to_string();
+            let tx = self.bg_sender.clone();
+            let cancel = self.operation_cancel.clone();
+            cancel.store(false, std::sync::atomic::Ordering::Relaxed);
+            self.operation_progress = (0, 0);
+            self.popup = Popup::OperationProgress;
+
+            std::thread::spawn(move || {
+                let total = messages.len();
+                let _ = tx.send(BgResult::OperationProgress { completed: 0, total });
+
+                for (i, msg) in messages.iter().enumerate() {
+                    if cancel.load(std::sync::atomic::Ordering::Relaxed) {
+                        let _ = tx.send(BgResult::OperationComplete(
+                            Ok(format!("Re-route cancelled after {}/{} messages", i, total))
+                        ));
+                        return;
+                    }
+
+                    // Remove x-death header from the re-routed message
+                    let headers: Vec<(String, String)> = msg.headers.iter()
+                        .filter(|(k, _)| k != "x-death" && k != "x-first-death-exchange" && k != "x-first-death-queue" && k != "x-first-death-reason")
+                        .cloned()
+                        .collect();
+
+                    let result = backend.publish_to_exchange(
+                        &namespace, &exchange, &msg.body, &routing_key, &headers, &msg.content_type,
+                    );
+
+                    if let Err(e) = result {
+                        let _ = tx.send(BgResult::OperationComplete(
+                            Err(format!("Re-route failed at message {}/{}: {}", i + 1, total, e))
+                        ));
+                        return;
+                    }
+
+                    let _ = tx.send(BgResult::OperationProgress { completed: i + 1, total });
+                }
+
+                let _ = tx.send(BgResult::OperationComplete(
+                    Ok(format!("Re-routed {} messages to exchange '{}' with key '{}'", total, exchange, routing_key))
+                ));
+            });
+        }
+    }
+
     pub fn re_publish_selected(&self) {
         if let Some(ref backend) = self.backend {
             let messages = self.get_target_messages();
@@ -1025,6 +1108,19 @@ impl App {
             std::thread::spawn(move || {
                 let result = backend.delete_queue(&namespace, &queue);
                 let _ = tx.send(BgResult::Deleted(result));
+            });
+        }
+    }
+
+    pub fn load_consumer_groups(&self, queue: &str) {
+        if let Some(ref backend) = self.backend {
+            let backend = backend.clone_backend();
+            let namespace = self.selected_namespace.clone();
+            let queue = queue.to_string();
+            let tx = self.bg_sender.clone();
+            std::thread::spawn(move || {
+                let result = backend.consumer_groups(&namespace, &queue);
+                let _ = tx.send(BgResult::ConsumerGroups(result));
             });
         }
     }
@@ -1256,6 +1352,16 @@ impl App {
                     self.popup = Popup::None;
                     self.set_status(e, true);
                 }
+                BgResult::ConsumerGroups(Ok(groups)) => {
+                    self.consumer_groups = groups;
+                    self.consumer_groups_scroll = 0;
+                    self.loading = false;
+                }
+                BgResult::ConsumerGroups(Err(e)) => {
+                    self.popup = Popup::None;
+                    self.loading = false;
+                    self.set_status(format!("Consumer groups: {}", e), true);
+                }
                 BgResult::QueueDetail(Ok(detail)) => {
                     self.queue_detail = detail;
                     self.queue_info_scroll = 0;
@@ -1311,6 +1417,26 @@ fn chrono_timestamp() -> String {
         .unwrap_or_default()
         .as_secs();
     format!("{}", secs)
+}
+
+/// Parse x-death header value to extract original exchange and routing key
+pub fn parse_x_death_value(value: &str) -> Option<(String, String)> {
+    // x-death is typically a JSON array: [{"exchange":"...", "routing-keys":["..."], ...}]
+    // or a stringified version of it
+    if let Ok(arr) = serde_json::from_str::<serde_json::Value>(value) {
+        let entry = if arr.is_array() { arr.get(0)? } else { &arr };
+        let exchange = entry.get("exchange").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let routing_key = entry.get("routing-keys")
+            .and_then(|v| v.as_array())
+            .and_then(|arr| arr.first())
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        if !exchange.is_empty() || !routing_key.is_empty() {
+            return Some((exchange, routing_key));
+        }
+    }
+    None
 }
 
 fn message_to_json(m: &MessageInfo) -> String {

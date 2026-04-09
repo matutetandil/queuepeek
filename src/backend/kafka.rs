@@ -9,7 +9,7 @@ use rdkafka::message::{Headers, Message};
 use rdkafka::TopicPartitionList;
 use rdkafka::Offset;
 
-use super::{Backend, BrokerInfo, DetailEntry, DetailSection, MessageInfo, QueueInfo};
+use super::{Backend, BrokerInfo, ConsumerGroupInfo, ConsumerGroupPartition, DetailEntry, DetailSection, MessageInfo, QueueInfo};
 use crate::config::Profile;
 
 pub struct KafkaBackend {
@@ -472,6 +472,104 @@ impl Backend for KafkaBackend {
             }
             Ok(())
         })
+    }
+
+    fn consumer_groups(&self, _namespace: &str, queue: &str) -> Result<Vec<ConsumerGroupInfo>, String> {
+        let admin = self.make_admin()?;
+
+        // List all consumer groups
+        let group_list = admin.inner()
+            .fetch_group_list(None, Duration::from_secs(10))
+            .map_err(|e| format!("Listing consumer groups: {}", e))?;
+
+        // Get topic partition info for watermarks
+        let metadata = admin.inner()
+            .fetch_metadata(Some(queue), Duration::from_secs(10))
+            .map_err(|e| format!("Fetching topic metadata: {}", e))?;
+
+        let topic_metadata = metadata.topics().first()
+            .ok_or_else(|| format!("Topic '{}' not found", queue))?;
+
+        let partition_ids: Vec<i32> = topic_metadata.partitions().iter().map(|p| p.id()).collect();
+
+        // Get high watermarks for lag calculation
+        let watermark_consumer: BaseConsumer = self.base_config()
+            .set("group.id", "queuepeek-groups-check")
+            .create()
+            .map_err(|e| format!("Creating consumer: {}", e))?;
+
+        let mut high_watermarks: std::collections::HashMap<i32, i64> = std::collections::HashMap::new();
+        for &pid in &partition_ids {
+            if let Ok((_low, high)) = watermark_consumer.fetch_watermarks(queue, pid, Duration::from_secs(5)) {
+                high_watermarks.insert(pid, high);
+            }
+        }
+
+        let mut results = Vec::new();
+
+        for group in group_list.groups() {
+            let group_name = group.name();
+            // Skip internal groups
+            if group_name.starts_with("queuepeek-") { continue; }
+
+            // Create a consumer with this group ID to check committed offsets
+            let check_consumer: BaseConsumer = match self.base_config()
+                .set("group.id", group_name)
+                .set("enable.auto.commit", "false")
+                .create() {
+                Ok(c) => c,
+                Err(_) => continue,
+            };
+
+            // Build TPL for this topic
+            let mut tpl = TopicPartitionList::new();
+            for &pid in &partition_ids {
+                tpl.add_partition(queue, pid);
+            }
+
+            // Fetch committed offsets for this group on this topic
+            let committed = match check_consumer.committed_offsets(tpl, Duration::from_secs(5)) {
+                Ok(c) => c,
+                Err(_) => continue,
+            };
+
+            let mut partitions = Vec::new();
+            let mut has_offsets = false;
+
+            for elem in committed.elements() {
+                if elem.topic() != queue { continue; }
+                let offset = match elem.offset() {
+                    Offset::Offset(o) => o,
+                    _ => -1,
+                };
+                if offset < 0 { continue; }
+                has_offsets = true;
+                let hw = high_watermarks.get(&elem.partition()).copied().unwrap_or(0);
+                let lag = (hw - offset).max(0);
+                partitions.push(ConsumerGroupPartition {
+                    partition: elem.partition(),
+                    current_offset: offset,
+                    high_watermark: hw,
+                    lag,
+                });
+            }
+
+            if !has_offsets { continue; }
+
+            let total_lag: i64 = partitions.iter().map(|p| p.lag).sum();
+            partitions.sort_by_key(|p| p.partition);
+
+            results.push(ConsumerGroupInfo {
+                name: group_name.to_string(),
+                state: group.state().to_string(),
+                members: group.members().len() as u32,
+                total_lag,
+                partitions,
+            });
+        }
+
+        results.sort_by(|a, b| a.name.cmp(&b.name));
+        Ok(results)
     }
 
     fn queue_detail(&self, _namespace: &str, queue: &str) -> Result<Vec<DetailSection>, String> {

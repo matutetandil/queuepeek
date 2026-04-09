@@ -55,6 +55,14 @@ fn draw_header(frame: &mut Frame, app: &App, area: Rect) {
         } else {
             Span::raw("")
         },
+        if app.message_auto_refresh {
+            Span::styled(
+                "  [live ⟳]",
+                Style::default().fg(app.theme.accent).bold().bg(app.theme.sidebar_bg),
+            )
+        } else {
+            Span::raw("")
+        },
     ]);
 
     frame.render_widget(
@@ -226,6 +234,12 @@ fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
         Span::styled(":dump ", ds),
         Span::styled("I", ks),
         Span::styled(":import ", ds),
+        Span::styled("L", ks),
+        Span::styled(":reroute ", ds),
+        Span::styled("T", ks),
+        Span::styled(":tail ", ds),
+        Span::styled("r", ks),
+        Span::styled(":refresh ", ds),
         Span::styled("?", ks),
         Span::styled(":help", ds),
     ];

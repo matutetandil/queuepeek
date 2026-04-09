@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.4.0] - 2026-04-08
+
+### Added
+- Message list auto-refresh / tail mode (`T` to toggle, `r` for manual refresh)
+  - Auto-refreshes messages every 5 seconds when enabled
+  - `[live ⟳]` indicator in header bar when active
+- JSON and XML syntax highlighting in message detail view
+  - JSON: keys in accent color, strings in green, numbers/bools bold, brackets muted
+  - XML: tags in accent, attributes muted, text content in primary color
+  - Only applies when pretty-print is ON; raw mode stays monochrome
+- Edit & re-publish message (`E` in message detail)
+  - Opens publish form pre-filled with current message body, routing key, and content type
+  - Modify any field and re-publish to the same queue
+- DLQ detection and re-routing (`L` in message list or detail)
+  - Parses `x-death` header to extract original exchange and routing key
+  - Confirmation popup showing the re-route destination
+  - Publishes to original exchange with original routing key
+  - Strips x-death headers from re-routed messages
+  - RabbitMQ only (uses publish_to_exchange API)
+- Kafka consumer groups popup (`G` on queue list)
+  - Lists all consumer groups with committed offsets on the selected topic
+  - Shows per-partition offset, high watermark, and lag
+  - Color-coded lag (red > 0, green = 0)
+  - Group state and member count displayed
+  - Scrollable with j/k
+
+---
+
 ## [0.3.1] - 2026-04-08
 
 ### Added

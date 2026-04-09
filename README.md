@@ -40,6 +40,11 @@ queuepeek connects to message broker management APIs and lets you browse queues/
 - Dump entire queue to JSONL file (streaming, low memory, per-backend strategy)
 - Import messages from JSONL or JSON file into the current queue
 - Queue info popup (`i` on queue list) with detailed stats, rates with bar charts, and configuration
+- Message list auto-refresh / tail mode (`T` toggle, `r` manual refresh) with `[live ⟳]` indicator
+- JSON and XML syntax highlighting in message detail (colored keys, strings, numbers)
+- Edit & re-publish message from detail view (`E` key)
+- DLQ detection and re-routing (`L` key) — parses x-death header, re-publishes to original exchange
+- Kafka consumer groups popup (`G` on queue list) with per-partition lag info
 - Stream-based delete uses temp file backup for safe recovery on failure
 - Auto-update check on startup and hourly via GitHub Releases
 
@@ -207,6 +212,7 @@ Press `Esc` or `Backspace` at any screen to go back one level. In the message li
 | `C`          | Copy all messages to another queue (with picker)    |
 | `m`          | Move all messages to another queue (with picker)    |
 | `i`          | Show detailed queue/topic info (stats, config, rates)|
+| `G`          | Show consumer groups for selected topic (Kafka)      |
 | `t`          | Open theme picker                                   |
 | `Esc`        | Go back to profile screen                           |
 | `q` / Ctrl+C | Quit                                                |
@@ -248,6 +254,9 @@ Press `Esc` or `Backspace` at any screen to go back one level. In the message li
 | `R`          | Re-publish selected messages to the same queue                  |
 | `W`          | Dump entire queue to JSONL file (streaming, per-backend strategy)|
 | `I`          | Import messages from a JSONL or JSON file                       |
+| `L`          | DLQ re-route: re-publish to original exchange (x-death header)  |
+| `T`          | Toggle auto-refresh / tail mode (every 5 seconds)              |
+| `r`          | Manually refresh messages                                       |
 | `P`          | Publish a new message to the current queue                      |
 | `Esc`        | Clear selection (first press) / go back to queue list (second)  |
 | `q` / Ctrl+C | Quit                                                            |
@@ -263,6 +272,8 @@ Selection state is shown as a checkbox prefix on each message row (☑ selected,
 | `p`          | Toggle pretty-print             |
 | `c`          | Copy payload to clipboard       |
 | `h`          | Copy headers to clipboard       |
+| `E`          | Edit & re-publish message       |
+| `L`          | DLQ re-route (x-death header)   |
 | `[`          | Previous message                |
 | `]`          | Next message                    |
 | `Esc`        | Go back to message list         |

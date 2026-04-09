@@ -238,6 +238,8 @@ fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
         Span::styled(":del ", ds),
         Span::styled("i", ks),
         Span::styled(":info ", ds),
+        Span::styled("G", ks),
+        Span::styled(":groups ", ds),
         Span::styled("?", ks),
         Span::styled(":help", ds),
     ];
