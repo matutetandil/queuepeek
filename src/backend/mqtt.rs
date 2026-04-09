@@ -247,6 +247,11 @@ impl Backend for MqttBackend {
         Ok(messages)
     }
 
+    fn consume_messages(&self, namespace: &str, queue: &str, count: u32) -> Result<Vec<MessageInfo>, String> {
+        // MQTT subscriptions are inherently destructive, so consume == peek
+        self.peek_messages(namespace, queue, count)
+    }
+
     fn publish_message(
         &self,
         _namespace: &str,

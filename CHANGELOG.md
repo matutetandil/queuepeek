@@ -13,6 +13,8 @@
   - Reads from low watermark using ephemeral consumer groups
   - Enables copy/move operations on Kafka topics
 - `backend_type()` method on Backend trait for backend-specific behavior
+- MQTT `consume_messages()` as alias for `peek_messages()` (subscriptions are inherently destructive)
+  - Enables move, delete selected, copy, and re-publish operations on MQTT
 
 ### Changed
 - Improved dump for large queues with per-backend strategies:

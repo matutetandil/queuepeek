@@ -60,22 +60,24 @@ queuepeek connects to message broker management APIs and lets you browse queues/
 
 ### Operation Support Matrix
 
-| Operation              | RabbitMQ | Kafka | MQTT |
-|------------------------|----------|-------|------|
-| List queues            | Yes      | Yes   | Yes  |
-| Fetch messages         | Yes      | Yes   | Yes  |
-| Publish                | Yes      | Yes   | Yes  |
-| Purge queue            | Yes      | Yes   | No   |
-| Delete queue           | Yes      | Yes   | No   |
-| Copy messages          | Yes      | No    | No   |
-| Move messages          | Yes      | No    | No   |
-| Multi-select messages  | Yes      | Yes   | Yes  |
-| Copy selected messages | Yes      | No    | No   |
-| Delete selected        | Yes      | No    | No   |
-| Export selected to JSON| Yes      | Yes   | Yes  |
-| Re-publish selected    | Yes      | Yes   | No   |
-| Dump queue to JSONL    | Yes      | Yes   | Yes  |
-| Import from JSONL/JSON | Yes      | Yes   | Yes  |
+| Operation              | RabbitMQ | Kafka | MQTT   |
+|------------------------|----------|-------|--------|
+| List queues            | Yes      | Yes   | Yes    |
+| Fetch messages         | Yes      | Yes   | Yes    |
+| Publish                | Yes      | Yes   | Yes    |
+| Purge queue            | Yes      | Yes   | No     |
+| Delete queue           | Yes      | Yes   | No     |
+| Copy messages          | Yes      | No    | Yes*   |
+| Move messages          | Yes      | No    | Yes*   |
+| Multi-select messages  | Yes      | Yes   | Yes    |
+| Copy selected messages | Yes      | No    | Yes    |
+| Delete selected        | Yes      | No    | Yes*   |
+| Export selected to JSON| Yes      | Yes   | Yes    |
+| Re-publish selected    | Yes      | Yes   | Yes    |
+| Dump queue to JSONL    | Yes      | Yes   | Yes    |
+| Import from JSONL/JSON | Yes      | Yes   | Yes    |
+
+\* MQTT subscriptions are inherently destructive (messages are consumed on read). Copy, move, and delete operations work but read from the subscription stream — there is no non-destructive peek.
 
 ## Prerequisites
 
