@@ -61,6 +61,10 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App)
         // Auto-refresh queues every 5 seconds when on QueueList screen
         if app.screen == Screen::QueueList && !app.loading && last_refresh.elapsed() >= Duration::from_secs(5) {
             app.load_queues();
+            // Also refresh queue info popup if open
+            if app.popup == Popup::QueueInfo && !app.queue_info_name.is_empty() {
+                app.load_queue_detail(&app.queue_info_name.clone());
+            }
             last_refresh = Instant::now();
         }
 
