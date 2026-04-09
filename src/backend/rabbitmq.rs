@@ -170,6 +170,7 @@ impl RabbitMqBackend {
 }
 
 impl Backend for RabbitMqBackend {
+    fn backend_type(&self) -> &str { "rabbitmq" }
     fn broker_info(&self) -> Result<BrokerInfo, String> {
         let resp: OverviewResponse = self.get("/api/overview")?;
         Ok(BrokerInfo {

@@ -81,6 +81,7 @@ impl KafkaBackend {
 }
 
 impl Backend for KafkaBackend {
+    fn backend_type(&self) -> &str { "kafka" }
     fn broker_info(&self) -> Result<BrokerInfo, String> {
         let admin = self.make_admin()?;
         let metadata = admin
@@ -296,6 +297,156 @@ impl Backend for KafkaBackend {
             .map_err(|e| format!("Flushing producer: {}", e))?;
 
         Ok(())
+    }
+
+    fn purge_queue(&self, _namespace: &str, queue: &str) -> Result<(), String> {
+        use rdkafka::admin::{AdminOptions, NewTopic, TopicReplication};
+
+        let admin = self.make_admin()?;
+        let opts = AdminOptions::new();
+
+        // Get partition count before deleting
+        let metadata = admin
+            .inner()
+            .fetch_metadata(Some(queue), Duration::from_secs(10))
+            .map_err(|e| format!("Fetching topic metadata: {}", e))?;
+
+        let partition_count = metadata
+            .topics()
+            .first()
+            .map(|t| t.partitions().len())
+            .unwrap_or(1);
+
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .map_err(|e| format!("Creating runtime: {}", e))?;
+
+        rt.block_on(async {
+            // Delete the topic
+            let results = admin.delete_topics(&[queue], &opts).await
+                .map_err(|e| format!("Deleting topic: {}", e))?;
+            for result in results {
+                if let Err((_, e)) = result {
+                    return Err(format!("Deleting topic '{}': {}", queue, e));
+                }
+            }
+
+            // Wait for deletion to propagate
+            tokio::time::sleep(Duration::from_secs(2)).await;
+
+            // Recreate with same partition count
+            let new_topic = NewTopic::new(queue, partition_count as i32, TopicReplication::Fixed(1));
+            let results = admin.create_topics(&[new_topic], &opts).await
+                .map_err(|e| format!("Recreating topic: {}", e))?;
+            for result in results {
+                if let Err((_, e)) = result {
+                    return Err(format!("Recreating topic '{}': {}", queue, e));
+                }
+            }
+
+            Ok(())
+        })
+    }
+
+    fn consume_messages(&self, _namespace: &str, queue: &str, count: u32) -> Result<Vec<MessageInfo>, String> {
+        let group_id = format!("queuepeek-consume-{}", uuid::Uuid::new_v4());
+        let consumer = self.make_consumer(&group_id)?;
+
+        let metadata = consumer
+            .fetch_metadata(Some(queue), Duration::from_secs(10))
+            .map_err(|e| format!("Fetching topic metadata: {}", e))?;
+
+        let topic_metadata = metadata
+            .topics()
+            .first()
+            .ok_or_else(|| format!("Topic '{}' not found", queue))?;
+
+        if topic_metadata.partitions().is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // Assign partitions from the beginning (low watermark)
+        let mut tpl = TopicPartitionList::new();
+        for partition in topic_metadata.partitions() {
+            let pid = partition.id();
+            match consumer.fetch_watermarks(queue, pid, Duration::from_secs(5)) {
+                Ok((low, _high)) => {
+                    tpl.add_partition_offset(queue, pid, Offset::Offset(low))
+                        .map_err(|e| format!("Setting partition offset: {}", e))?;
+                }
+                Err(e) => {
+                    return Err(format!("Fetching watermarks for partition {}: {}", pid, e));
+                }
+            }
+        }
+
+        consumer
+            .assign(&tpl)
+            .map_err(|e| format!("Assigning partitions: {}", e))?;
+
+        let mut messages = Vec::new();
+        let deadline = std::time::Instant::now() + Duration::from_secs(30);
+
+        while messages.len() < count as usize && std::time::Instant::now() < deadline {
+            match consumer.poll(Duration::from_millis(500)) {
+                Some(Ok(msg)) => {
+                    let body = match msg.payload_view::<str>() {
+                        Some(Ok(s)) => s.to_string(),
+                        Some(Err(_)) => {
+                            msg.payload()
+                                .map(|b| b.iter().map(|byte| format!("{:02x}", byte)).collect::<Vec<_>>().join(" "))
+                                .unwrap_or_default()
+                        }
+                        None => String::new(),
+                    };
+
+                    let mut headers = Vec::new();
+                    headers.push(("partition".to_string(), msg.partition().to_string()));
+                    headers.push(("offset".to_string(), msg.offset().to_string()));
+
+                    if let Some(key) = msg.key() {
+                        let key_str = String::from_utf8_lossy(key).to_string();
+                        headers.push(("key".to_string(), key_str));
+                    }
+
+                    if let Some(rdkafka_headers) = msg.headers() {
+                        for header in rdkafka_headers.iter() {
+                            let value = header.value
+                                .map(|v| String::from_utf8_lossy(v).to_string())
+                                .unwrap_or_default();
+                            headers.push((header.key.to_string(), value));
+                        }
+                    }
+
+                    let timestamp = match msg.timestamp() {
+                        rdkafka::Timestamp::CreateTime(ts) | rdkafka::Timestamp::LogAppendTime(ts) => Some(ts / 1000),
+                        rdkafka::Timestamp::NotAvailable => None,
+                    };
+
+                    messages.push(MessageInfo {
+                        index: messages.len() + 1,
+                        routing_key: format!("partition-{}", msg.partition()),
+                        exchange: queue.to_string(),
+                        redelivered: false,
+                        timestamp,
+                        content_type: String::new(),
+                        headers,
+                        body,
+                    });
+                }
+                Some(Err(e)) => {
+                    return Err(format!("Consuming message: {}", e));
+                }
+                None => {
+                    if messages.is_empty() && std::time::Instant::now() > deadline - Duration::from_secs(25) {
+                        break;
+                    }
+                }
+            }
+        }
+
+        Ok(messages)
     }
 
     fn delete_queue(&self, _namespace: &str, queue: &str) -> Result<(), String> {

@@ -224,6 +224,8 @@ fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
         Span::styled(":resend ", ds),
         Span::styled("W", ks),
         Span::styled(":dump ", ds),
+        Span::styled("I", ks),
+        Span::styled(":import ", ds),
         Span::styled("?", ks),
         Span::styled(":help", ds),
     ];

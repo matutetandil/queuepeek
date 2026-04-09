@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.3.1] - 2026-04-08
+
+### Added
+- Import messages from JSONL or JSON file (`I` key in message list)
+  - Supports both JSONL format (from dump) and JSON array format (from export)
+  - File path input popup with auto-detection of file format
+  - Streaming publish with progress bar and cancellation support
+- Kafka `purge_queue()` support (`x` key on queue list)
+  - Deletes and recreates the topic with the same partition count
+- Kafka `consume_messages()` implementation
+  - Reads from low watermark using ephemeral consumer groups
+  - Enables copy/move operations on Kafka topics
+- `backend_type()` method on Backend trait for backend-specific behavior
+
+### Changed
+- Improved dump for large queues with per-backend strategies:
+  - RabbitMQ: consume all → dump to JSONL → re-publish all back (gets entire queue, not just first batch)
+  - Kafka: uses peek with large batch size for non-destructive dump
+  - MQTT: single peek batch (no message history available)
+- Updated help popup with all message list keyboard shortcuts
+- Added `I:import` hint to message list footer
+
+---
+
 ## [0.3.0] - 2026-04-08
 
 ### Changed

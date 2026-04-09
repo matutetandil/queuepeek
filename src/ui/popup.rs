@@ -23,6 +23,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
                 &format!("Delete {} selected message(s)?\n\nThis consumes all messages and re-publishes\nthe ones not selected. This is destructive.", count));
         }
         Popup::ExportMessages => {}
+        Popup::ImportFile => draw_import_file(frame, app),
         Popup::None => {}
     }
 }
@@ -66,6 +67,12 @@ fn draw_help(frame: &mut Frame, app: &App) {
         ("D", "Delete queue"),
         ("C", "Copy messages to queue"),
         ("m", "Move messages to queue"),
+        ("spc", "Select message (list)"),
+        ("a", "Select/deselect all"),
+        ("e", "Export selected to JSON"),
+        ("R", "Re-publish selected"),
+        ("W", "Dump queue to JSONL"),
+        ("I", "Import from JSONL/JSON"),
         ("esc", "Go back"),
         ("?", "Toggle help"),
         ("q", "Quit"),
@@ -436,6 +443,46 @@ fn draw_queue_picker(frame: &mut Frame, app: &mut App) {
             Rect::new(popup_area.x + 2, filter_y, popup_area.width.saturating_sub(4), 1),
         );
     }
+}
+
+fn draw_import_file(frame: &mut Frame, app: &App) {
+    let popup_area = centered_rect(60, 25, frame.area());
+    frame.render_widget(Clear, popup_area);
+
+    let block = Block::bordered()
+        .title(" Import Messages ")
+        .title_style(Style::default().fg(app.theme.accent).bold())
+        .border_style(Style::default().fg(app.theme.accent))
+        .style(Style::default().bg(app.theme.bg));
+
+    let inner = Rect::new(popup_area.x + 2, popup_area.y + 1, popup_area.width.saturating_sub(4), popup_area.height.saturating_sub(2));
+
+    frame.render_widget(block, popup_area);
+
+    let label_style = Style::default().fg(app.theme.accent);
+    let value_style = Style::default().fg(app.theme.white);
+    let hint_style = Style::default().fg(app.theme.muted);
+
+    let lines = vec![
+        Line::from(""),
+        Line::from(Span::styled("  File path (JSONL or JSON):", label_style)),
+        Line::from(""),
+        Line::from(Span::styled(format!("  {}█", app.import_file_path), value_style)),
+        Line::from(""),
+        Line::from(Span::styled("  Supports .jsonl (dump) and .json (export) formats", hint_style)),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("  ⏎", Style::default().fg(app.theme.accent).bold()),
+            Span::styled(":import  ", hint_style),
+            Span::styled("esc", Style::default().fg(app.theme.accent).bold()),
+            Span::styled(":cancel", hint_style),
+        ]),
+    ];
+
+    frame.render_widget(
+        Paragraph::new(lines).style(Style::default().bg(app.theme.bg)),
+        inner,
+    );
 }
 
 fn draw_operation_progress(frame: &mut Frame, app: &App) {

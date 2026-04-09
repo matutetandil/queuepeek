@@ -596,6 +596,11 @@ fn handle_message_list_key(app: &mut App, code: KeyCode, modifiers: KeyModifiers
             // Dump entire queue to JSONL file (streaming)
             app.do_dump_queue();
         }
+        KeyCode::Char('I') => {
+            // Import messages from JSONL/JSON file
+            app.import_file_path = "./".to_string();
+            app.popup = Popup::ImportFile;
+        }
         KeyCode::Esc => {
             if !app.selected_messages.is_empty() {
                 // First Esc clears selection
@@ -1097,6 +1102,25 @@ fn handle_popup_key(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
         }
         Popup::ExportMessages => {
             app.popup = Popup::None;
+        }
+        Popup::ImportFile => {
+            match code {
+                KeyCode::Char(c) => {
+                    app.import_file_path.push(c);
+                }
+                KeyCode::Backspace => {
+                    app.import_file_path.pop();
+                }
+                KeyCode::Enter => {
+                    app.popup = Popup::None;
+                    app.do_import_jsonl();
+                }
+                KeyCode::Esc => {
+                    app.popup = Popup::None;
+                    app.import_file_path.clear();
+                }
+                _ => {}
+            }
         }
         Popup::OperationProgress => {
             if code == KeyCode::Esc {

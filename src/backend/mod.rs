@@ -35,6 +35,7 @@ pub struct MessageInfo {
 
 /// Generic backend trait — implement for each broker type
 pub trait Backend: Send {
+    fn backend_type(&self) -> &str;
     fn broker_info(&self) -> Result<BrokerInfo, String>;
     fn list_namespaces(&self) -> Result<Vec<String>, String>;
     fn list_queues(&self, namespace: &str) -> Result<Vec<QueueInfo>, String>;

@@ -73,6 +73,7 @@ impl MqttBackend {
 }
 
 impl Backend for MqttBackend {
+    fn backend_type(&self) -> &str { "mqtt" }
     fn broker_info(&self) -> Result<BrokerInfo, String> {
         let client_id = format!("queuepeek-info-{}", uuid::Uuid::new_v4());
         let opts = self.make_options(&client_id)?;

@@ -37,7 +37,8 @@ queuepeek connects to message broker management APIs and lets you browse queues/
 - Delete selected messages with confirmation (consume-and-requeue approach)
 - Export selected messages to a JSON file in the current directory
 - Re-publish selected messages to the same queue (useful for retry workflows)
-- Dump entire queue to JSONL file (non-destructive, streaming, low memory)
+- Dump entire queue to JSONL file (streaming, low memory, per-backend strategy)
+- Import messages from JSONL or JSON file into the current queue
 - Stream-based delete uses temp file backup for safe recovery on failure
 - Auto-update check on startup and hourly via GitHub Releases
 
@@ -64,7 +65,7 @@ queuepeek connects to message broker management APIs and lets you browse queues/
 | List queues            | Yes      | Yes   | Yes  |
 | Fetch messages         | Yes      | Yes   | Yes  |
 | Publish                | Yes      | Yes   | Yes  |
-| Purge queue            | Yes      | No    | No   |
+| Purge queue            | Yes      | Yes   | No   |
 | Delete queue           | Yes      | Yes   | No   |
 | Copy messages          | Yes      | No    | No   |
 | Move messages          | Yes      | No    | No   |
@@ -74,6 +75,7 @@ queuepeek connects to message broker management APIs and lets you browse queues/
 | Export selected to JSON| Yes      | Yes   | Yes  |
 | Re-publish selected    | Yes      | Yes   | No   |
 | Dump queue to JSONL    | Yes      | Yes   | Yes  |
+| Import from JSONL/JSON | Yes      | Yes   | Yes  |
 
 ## Prerequisites
 
@@ -240,7 +242,8 @@ Press `Esc` or `Backspace` at any screen to go back one level. In the message li
 | `D`          | Delete selected messages (destructive, with confirmation)       |
 | `e`          | Export selected messages to a JSON file in the current directory|
 | `R`          | Re-publish selected messages to the same queue                  |
-| `W`          | Dump entire queue to JSONL file (non-destructive, streaming)    |
+| `W`          | Dump entire queue to JSONL file (streaming, per-backend strategy)|
+| `I`          | Import messages from a JSONL or JSON file                       |
 | `P`          | Publish a new message to the current queue                      |
 | `Esc`        | Clear selection (first press) / go back to queue list (second)  |
 | `q` / Ctrl+C | Quit                                                            |

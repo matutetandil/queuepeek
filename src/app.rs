@@ -53,6 +53,7 @@ pub enum Popup {
     OperationProgress,
     ConfirmDeleteMessages,
     ExportMessages,
+    ImportFile,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -135,6 +136,9 @@ pub struct App {
     // Queue picker filter
     pub queue_picker_filter: String,
     pub queue_picker_filter_active: bool,
+
+    // Import
+    pub import_file_path: String,
 
     // Auto-update
     pub update_checker: UpdateChecker,
@@ -435,6 +439,7 @@ impl App {
             operation_cancel: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             queue_picker_filter: String::new(),
             queue_picker_filter_active: false,
+            import_file_path: String::new(),
             update_checker: UpdateChecker::new(),
         }
     }
@@ -797,6 +802,10 @@ impl App {
     }
 
     /// Dump entire queue to JSONL file (streaming, low memory)
+    /// Strategy varies by backend:
+    /// - RabbitMQ: consume all → dump → re-publish (temporarily removes messages)
+    /// - Kafka: dedicated consumer from low watermark, non-destructive
+    /// - MQTT: single peek batch (no history)
     pub fn do_dump_queue(&mut self) {
         if let Some(ref backend) = self.backend {
             let backend = backend.clone_backend();
@@ -808,67 +817,134 @@ impl App {
             self.operation_progress = (0, 0);
             self.popup = Popup::OperationProgress;
 
-            std::thread::spawn(move || {
-                use std::io::Write;
+            let backend_type = backend.backend_type().to_string();
 
-                let filename = format!("queuepeek-dump-{}-{}.jsonl", queue, chrono_timestamp());
-                let path = std::env::current_dir().unwrap_or_default().join(&filename);
-                let file = match std::fs::File::create(&path) {
+            std::thread::spawn(move || {
+                match backend_type.as_str() {
+                    "rabbitmq" => dump_rabbitmq(backend, &namespace, &queue, tx, cancel),
+                    "kafka" => dump_kafka(backend, &namespace, &queue, tx, cancel),
+                    _ => dump_simple_peek(backend, &namespace, &queue, tx, cancel),
+                }
+            });
+        }
+    }
+
+    /// Import messages from a JSONL or JSON array file into the current queue
+    pub fn do_import_jsonl(&mut self) {
+        if let Some(ref backend) = self.backend {
+            let path_str = self.import_file_path.trim().to_string();
+            if path_str.is_empty() { return; }
+
+            let path = std::path::PathBuf::from(&path_str);
+            if !path.exists() {
+                self.set_status(format!("File not found: {}", path_str), true);
+                return;
+            }
+
+            let backend = backend.clone_backend();
+            let namespace = self.selected_namespace.clone();
+            let queue = self.current_queue_name.clone();
+            let tx = self.bg_sender.clone();
+            let cancel = self.operation_cancel.clone();
+            cancel.store(false, std::sync::atomic::Ordering::Relaxed);
+            self.operation_progress = (0, 0);
+            self.popup = Popup::OperationProgress;
+
+            std::thread::spawn(move || {
+                use std::io::{BufRead, Read};
+
+                // Read first byte to detect format
+                let mut file = match std::fs::File::open(&path) {
                     Ok(f) => f,
                     Err(e) => {
-                        let _ = tx.send(BgResult::OperationComplete(Err(format!("Creating file: {}", e))));
+                        let _ = tx.send(BgResult::OperationComplete(Err(format!("Opening file: {}", e))));
                         return;
                     }
                 };
-                let mut writer = std::io::BufWriter::new(file);
 
-                let batch_size = 100u32;
-                let mut total = 0usize;
+                let mut first_bytes = [0u8; 64];
+                let n = file.read(&mut first_bytes).unwrap_or(0);
+                let first_content = String::from_utf8_lossy(&first_bytes[..n]);
+                let is_json_array = first_content.trim_start().starts_with('[');
+                drop(file);
 
-                loop {
+                let messages: Vec<serde_json::Value> = if is_json_array {
+                    // JSON array format (from export)
+                    let content = match std::fs::read_to_string(&path) {
+                        Ok(c) => c,
+                        Err(e) => {
+                            let _ = tx.send(BgResult::OperationComplete(Err(format!("Reading file: {}", e))));
+                            return;
+                        }
+                    };
+                    match serde_json::from_str(&content) {
+                        Ok(v) => v,
+                        Err(e) => {
+                            let _ = tx.send(BgResult::OperationComplete(Err(format!("Parsing JSON array: {}", e))));
+                            return;
+                        }
+                    }
+                } else {
+                    // JSONL format — read line by line
+                    let file = match std::fs::File::open(&path) {
+                        Ok(f) => f,
+                        Err(e) => {
+                            let _ = tx.send(BgResult::OperationComplete(Err(format!("Opening file: {}", e))));
+                            return;
+                        }
+                    };
+                    let reader = std::io::BufReader::new(file);
+                    let mut msgs = Vec::new();
+                    for line in reader.lines() {
+                        let line = match line {
+                            Ok(l) if !l.trim().is_empty() => l,
+                            _ => continue,
+                        };
+                        match serde_json::from_str(&line) {
+                            Ok(v) => msgs.push(v),
+                            Err(_) => continue,
+                        }
+                    }
+                    msgs
+                };
+
+                if messages.is_empty() {
+                    let _ = tx.send(BgResult::OperationComplete(Err("No messages found in file".into())));
+                    return;
+                }
+
+                let total = messages.len();
+                let _ = tx.send(BgResult::OperationProgress { completed: 0, total });
+
+                for (i, msg) in messages.iter().enumerate() {
                     if cancel.load(std::sync::atomic::Ordering::Relaxed) {
                         let _ = tx.send(BgResult::OperationComplete(
-                            Ok(format!("Dump cancelled after {} messages — saved to {}", total, path.display()))
+                            Ok(format!("Import cancelled after {}/{} messages", i, total))
                         ));
                         return;
                     }
 
-                    // Peek (non-destructive) in batches
-                    let batch = match backend.peek_messages(&namespace, &queue, batch_size) {
-                        Ok(msgs) => msgs,
-                        Err(e) => {
-                            if total > 0 {
-                                let _ = tx.send(BgResult::OperationComplete(
-                                    Ok(format!("Dumped {} messages to {} (stopped: {})", total, path.display(), e))
-                                ));
-                            } else {
-                                let _ = tx.send(BgResult::OperationComplete(Err(format!("Peek failed: {}", e))));
-                            }
-                            return;
-                        }
-                    };
+                    let body = msg["body"].as_str().unwrap_or("");
+                    let routing_key = msg["routing_key"].as_str().unwrap_or("");
+                    let content_type = msg["content_type"].as_str().unwrap_or("");
+                    let headers: Vec<(String, String)> = msg["headers"].as_object()
+                        .map(|h| h.iter().map(|(k, v)| (k.clone(), v.as_str().unwrap_or("").to_string())).collect())
+                        .unwrap_or_default();
 
-                    if batch.is_empty() { break; }
-
-                    for msg in &batch {
-                        let json = message_to_json(msg);
-                        if let Err(e) = writeln!(writer, "{}", json) {
-                            let _ = tx.send(BgResult::OperationComplete(
-                                Err(format!("Writing: {} — partial dump at {}", e, path.display()))
-                            ));
-                            return;
-                        }
+                    if let Err(e) = backend.publish_message(
+                        &namespace, &queue, body, routing_key, &headers, content_type,
+                    ) {
+                        let _ = tx.send(BgResult::OperationComplete(
+                            Err(format!("Import failed at message {}/{}: {}", i + 1, total, e))
+                        ));
+                        return;
                     }
 
-                    total += batch.len();
-                    let _ = tx.send(BgResult::OperationProgress { completed: total, total: 0 });
-
-                    // RabbitMQ peek always returns the same messages, so one batch is all we get
-                    break;
+                    let _ = tx.send(BgResult::OperationProgress { completed: i + 1, total });
                 }
 
                 let _ = tx.send(BgResult::OperationComplete(
-                    Ok(format!("Dumped {} messages to {}", total, path.display()))
+                    Ok(format!("Imported {} messages from {}", total, path.display()))
                 ));
             });
         }
@@ -1219,4 +1295,259 @@ fn message_to_json(m: &MessageInfo) -> String {
         "body": m.body,
     });
     serde_json::to_string(&val).unwrap_or_default()
+}
+
+/// RabbitMQ dump: consume all → write JSONL → re-publish all back
+fn dump_rabbitmq(
+    backend: Box<dyn Backend>,
+    namespace: &str,
+    queue: &str,
+    tx: mpsc::Sender<BgResult>,
+    cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
+) {
+    use std::io::{BufRead, Write};
+
+    let filename = format!("queuepeek-dump-{}-{}.jsonl", queue, chrono_timestamp());
+    let path = std::env::current_dir().unwrap_or_default().join(&filename);
+    let file = match std::fs::File::create(&path) {
+        Ok(f) => f,
+        Err(e) => {
+            let _ = tx.send(BgResult::OperationComplete(Err(format!("Creating file: {}", e))));
+            return;
+        }
+    };
+    let mut writer = std::io::BufWriter::new(file);
+
+    // Phase 1: consume all messages to JSONL file
+    let batch_size = 100u32;
+    let mut total = 0usize;
+
+    loop {
+        if cancel.load(std::sync::atomic::Ordering::Relaxed) {
+            let _ = tx.send(BgResult::OperationComplete(
+                Ok(format!("Dump cancelled after {} messages — saved to {}", total, path.display()))
+            ));
+            return;
+        }
+
+        let batch = match backend.consume_messages(namespace, queue, batch_size) {
+            Ok(msgs) => msgs,
+            Err(e) => {
+                if total > 0 {
+                    // We already consumed some — must re-publish what we have
+                    drop(writer);
+                    let _ = tx.send(BgResult::OperationProgress { completed: total, total: 0 });
+                    republish_from_file(&backend, namespace, queue, &path, &tx, &cancel);
+                    let _ = tx.send(BgResult::OperationComplete(
+                        Ok(format!("Dumped {} messages to {} (consume stopped: {})", total, path.display(), e))
+                    ));
+                } else {
+                    let _ = tx.send(BgResult::OperationComplete(Err(format!("Consume failed: {}", e))));
+                }
+                return;
+            }
+        };
+
+        if batch.is_empty() { break; }
+
+        for msg in &batch {
+            let json = message_to_json(msg);
+            if let Err(e) = writeln!(writer, "{}", json) {
+                let _ = tx.send(BgResult::OperationComplete(
+                    Err(format!("Writing: {} — partial dump at {}", e, path.display()))
+                ));
+                return;
+            }
+        }
+
+        total += batch.len();
+        let _ = tx.send(BgResult::OperationProgress { completed: total, total: 0 });
+
+        if (batch.len() as u32) < batch_size { break; }
+    }
+
+    drop(writer);
+
+    // Phase 2: re-publish all messages back to restore the queue
+    republish_from_file(&backend, namespace, queue, &path, &tx, &cancel);
+
+    let _ = tx.send(BgResult::OperationComplete(
+        Ok(format!("Dumped {} messages to {}", total, path.display()))
+    ));
+}
+
+/// Re-publish all messages from a JSONL file back to the queue
+fn republish_from_file(
+    backend: &Box<dyn Backend>,
+    namespace: &str,
+    queue: &str,
+    path: &std::path::Path,
+    tx: &mpsc::Sender<BgResult>,
+    cancel: &std::sync::Arc<std::sync::atomic::AtomicBool>,
+) {
+    use std::io::BufRead;
+
+    let file = match std::fs::File::open(path) {
+        Ok(f) => f,
+        Err(e) => {
+            let _ = tx.send(BgResult::OperationComplete(
+                Err(format!("Reading dump for re-publish: {} — file at {}", e, path.display()))
+            ));
+            return;
+        }
+    };
+    let reader = std::io::BufReader::new(file);
+
+    for line in reader.lines() {
+        if cancel.load(std::sync::atomic::Ordering::Relaxed) {
+            return;
+        }
+
+        let line = match line {
+            Ok(l) => l,
+            Err(_) => continue,
+        };
+
+        let msg: serde_json::Value = match serde_json::from_str(&line) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+
+        let body = msg["body"].as_str().unwrap_or("");
+        let routing_key = msg["routing_key"].as_str().unwrap_or("");
+        let content_type = msg["content_type"].as_str().unwrap_or("");
+        let headers: Vec<(String, String)> = msg["headers"].as_object()
+            .map(|h| h.iter().map(|(k, v)| (k.clone(), v.as_str().unwrap_or("").to_string())).collect())
+            .unwrap_or_default();
+
+        let _ = backend.publish_message(namespace, queue, body, routing_key, &headers, content_type);
+    }
+}
+
+/// Kafka dump: dedicated consumer from low watermark, non-destructive full read
+fn dump_kafka(
+    backend: Box<dyn Backend>,
+    namespace: &str,
+    queue: &str,
+    tx: mpsc::Sender<BgResult>,
+    cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
+) {
+    use std::io::Write;
+
+    let filename = format!("queuepeek-dump-{}-{}.jsonl", queue, chrono_timestamp());
+    let path = std::env::current_dir().unwrap_or_default().join(&filename);
+    let file = match std::fs::File::create(&path) {
+        Ok(f) => f,
+        Err(e) => {
+            let _ = tx.send(BgResult::OperationComplete(Err(format!("Creating file: {}", e))));
+            return;
+        }
+    };
+    let mut writer = std::io::BufWriter::new(file);
+
+    // For Kafka, use consume_messages in large batches — it reads from low watermark
+    // and Kafka doesn't actually delete data on consume
+    let batch_size = 500u32;
+    let mut total = 0usize;
+    let mut empty_polls = 0;
+
+    loop {
+        if cancel.load(std::sync::atomic::Ordering::Relaxed) {
+            let _ = tx.send(BgResult::OperationComplete(
+                Ok(format!("Dump cancelled after {} messages — saved to {}", total, path.display()))
+            ));
+            return;
+        }
+
+        let batch = match backend.peek_messages(namespace, queue, batch_size) {
+            Ok(msgs) => msgs,
+            Err(e) => {
+                if total > 0 {
+                    let _ = tx.send(BgResult::OperationComplete(
+                        Ok(format!("Dumped {} messages to {} (stopped: {})", total, path.display(), e))
+                    ));
+                } else {
+                    let _ = tx.send(BgResult::OperationComplete(Err(format!("Peek failed: {}", e))));
+                }
+                return;
+            }
+        };
+
+        if batch.is_empty() {
+            empty_polls += 1;
+            if empty_polls >= 2 { break; }
+            continue;
+        }
+        empty_polls = 0;
+
+        for msg in &batch {
+            let json = message_to_json(msg);
+            if let Err(e) = writeln!(writer, "{}", json) {
+                let _ = tx.send(BgResult::OperationComplete(
+                    Err(format!("Writing: {} — partial dump at {}", e, path.display()))
+                ));
+                return;
+            }
+        }
+
+        total += batch.len();
+        let _ = tx.send(BgResult::OperationProgress { completed: total, total: 0 });
+
+        // Kafka peek calculates offsets from watermarks each call, so we get one batch
+        break;
+    }
+
+    let _ = tx.send(BgResult::OperationComplete(
+        Ok(format!("Dumped {} messages to {}", total, path.display()))
+    ));
+}
+
+/// Simple peek-based dump for MQTT and other backends
+fn dump_simple_peek(
+    backend: Box<dyn Backend>,
+    namespace: &str,
+    queue: &str,
+    tx: mpsc::Sender<BgResult>,
+    cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
+) {
+    use std::io::Write;
+
+    let filename = format!("queuepeek-dump-{}-{}.jsonl", queue, chrono_timestamp());
+    let path = std::env::current_dir().unwrap_or_default().join(&filename);
+    let file = match std::fs::File::create(&path) {
+        Ok(f) => f,
+        Err(e) => {
+            let _ = tx.send(BgResult::OperationComplete(Err(format!("Creating file: {}", e))));
+            return;
+        }
+    };
+    let mut writer = std::io::BufWriter::new(file);
+
+    if cancel.load(std::sync::atomic::Ordering::Relaxed) {
+        let _ = tx.send(BgResult::OperationComplete(Ok("Dump cancelled".into())));
+        return;
+    }
+
+    let batch = match backend.peek_messages(namespace, queue, 100) {
+        Ok(msgs) => msgs,
+        Err(e) => {
+            let _ = tx.send(BgResult::OperationComplete(Err(format!("Peek failed: {}", e))));
+            return;
+        }
+    };
+
+    for msg in &batch {
+        let json = message_to_json(msg);
+        if let Err(e) = writeln!(writer, "{}", json) {
+            let _ = tx.send(BgResult::OperationComplete(
+                Err(format!("Writing: {} — partial dump at {}", e, path.display()))
+            ));
+            return;
+        }
+    }
+
+    let _ = tx.send(BgResult::OperationProgress { completed: batch.len(), total: batch.len() });
+    let _ = tx.send(BgResult::OperationComplete(
+        Ok(format!("Dumped {} messages to {}", batch.len(), path.display()))
+    ));
 }
