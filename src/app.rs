@@ -5,7 +5,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use ratatui::widgets::ListState;
 
 use crate::config::{Config, Profile};
-use crate::backend::{Backend, BrokerInfo, QueueInfo, MessageInfo};
+use crate::backend::{Backend, BrokerInfo, DetailSection, QueueInfo, MessageInfo};
 use crate::ui::theme::{get_theme, Theme};
 use crate::updater::UpdateChecker;
 
@@ -26,6 +26,7 @@ pub enum BgResult {
     Deleted(Result<(), String>),
     OperationProgress { completed: usize, total: usize },
     OperationComplete(Result<String, String>),
+    QueueDetail(Result<Vec<DetailSection>, String>),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -54,6 +55,7 @@ pub enum Popup {
     ConfirmDeleteMessages,
     ExportMessages,
     ImportFile,
+    QueueInfo,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -139,6 +141,11 @@ pub struct App {
 
     // Import
     pub import_file_path: String,
+
+    // Queue info popup
+    pub queue_detail: Vec<DetailSection>,
+    pub queue_info_scroll: u16,
+    pub queue_info_name: String,
 
     // Auto-update
     pub update_checker: UpdateChecker,
@@ -440,6 +447,9 @@ impl App {
             queue_picker_filter: String::new(),
             queue_picker_filter_active: false,
             import_file_path: String::new(),
+            queue_detail: Vec::new(),
+            queue_info_scroll: 0,
+            queue_info_name: String::new(),
             update_checker: UpdateChecker::new(),
         }
     }
@@ -1019,6 +1029,19 @@ impl App {
         }
     }
 
+    pub fn load_queue_detail(&self, queue: &str) {
+        if let Some(ref backend) = self.backend {
+            let backend = backend.clone_backend();
+            let namespace = self.selected_namespace.clone();
+            let queue = queue.to_string();
+            let tx = self.bg_sender.clone();
+            std::thread::spawn(move || {
+                let result = backend.queue_detail(&namespace, &queue);
+                let _ = tx.send(BgResult::QueueDetail(result));
+            });
+        }
+    }
+
     pub fn do_copy_or_move(&mut self, source: &str, dest: &str, operation: QueueOperation) {
         if let Some(ref backend) = self.backend {
             let backend = backend.clone_backend();
@@ -1232,6 +1255,16 @@ impl App {
                 BgResult::OperationComplete(Err(e)) => {
                     self.popup = Popup::None;
                     self.set_status(e, true);
+                }
+                BgResult::QueueDetail(Ok(detail)) => {
+                    self.queue_detail = detail;
+                    self.queue_info_scroll = 0;
+                    self.loading = false;
+                }
+                BgResult::QueueDetail(Err(e)) => {
+                    self.popup = Popup::None;
+                    self.loading = false;
+                    self.set_status(format!("Queue detail: {}", e), true);
                 }
             }
         }

@@ -405,6 +405,18 @@ fn handle_queue_list_key(app: &mut App, code: KeyCode, modifiers: KeyModifiers) 
                 app.popup_list_state.select(Some(0));
             }
         }
+        KeyCode::Char('i') => {
+            // Show queue info/detail
+            if let Some(q) = app.selected_queue() {
+                let name = q.name.clone();
+                app.queue_info_name = name.clone();
+                app.queue_detail.clear();
+                app.queue_info_scroll = 0;
+                app.popup = Popup::QueueInfo;
+                app.loading = true;
+                app.load_queue_detail(&name);
+            }
+        }
         _ => {}
     }
 }
@@ -1102,6 +1114,26 @@ fn handle_popup_key(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
         }
         Popup::ExportMessages => {
             app.popup = Popup::None;
+        }
+        Popup::QueueInfo => {
+            match code {
+                KeyCode::Char('j') | KeyCode::Down => {
+                    app.queue_info_scroll = app.queue_info_scroll.saturating_add(1);
+                }
+                KeyCode::Char('k') | KeyCode::Up => {
+                    app.queue_info_scroll = app.queue_info_scroll.saturating_sub(1);
+                }
+                KeyCode::PageDown => {
+                    app.queue_info_scroll = app.queue_info_scroll.saturating_add(10);
+                }
+                KeyCode::PageUp => {
+                    app.queue_info_scroll = app.queue_info_scroll.saturating_sub(10);
+                }
+                KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('i') => {
+                    app.popup = Popup::None;
+                }
+                _ => {}
+            }
         }
         Popup::ImportFile => {
             match code {

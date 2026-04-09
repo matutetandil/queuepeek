@@ -33,6 +33,30 @@ pub struct MessageInfo {
     pub body: String,
 }
 
+/// A section of key-value pairs for queue detail display
+#[derive(Debug, Clone)]
+pub struct DetailSection {
+    pub title: String,
+    pub entries: Vec<DetailEntry>,
+}
+
+/// A single key-value entry in a detail section
+#[derive(Debug, Clone)]
+pub struct DetailEntry {
+    pub key: String,
+    pub value: String,
+    pub rate_value: Option<f64>, // if set, renders a mini bar chart
+}
+
+impl DetailEntry {
+    pub fn kv(key: impl Into<String>, value: impl Into<String>) -> Self {
+        Self { key: key.into(), value: value.into(), rate_value: None }
+    }
+    pub fn rate(key: impl Into<String>, value: impl Into<String>, rate: f64) -> Self {
+        Self { key: key.into(), value: value.into(), rate_value: Some(rate) }
+    }
+}
+
 /// Generic backend trait — implement for each broker type
 pub trait Backend: Send {
     fn backend_type(&self) -> &str;
@@ -68,5 +92,10 @@ pub trait Backend: Send {
     /// Consume messages destructively (ack without requeue)
     fn consume_messages(&self, _namespace: &str, _queue: &str, _count: u32) -> Result<Vec<MessageInfo>, String> {
         Err("Consume not supported by this backend".into())
+    }
+
+    /// Get detailed queue/topic information as structured sections
+    fn queue_detail(&self, _namespace: &str, _queue: &str) -> Result<Vec<DetailSection>, String> {
+        Err("Queue detail not supported by this backend".into())
     }
 }

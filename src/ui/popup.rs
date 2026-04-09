@@ -24,6 +24,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         }
         Popup::ExportMessages => {}
         Popup::ImportFile => draw_import_file(frame, app),
+        Popup::QueueInfo => draw_queue_info(frame, app),
         Popup::None => {}
     }
 }
@@ -65,6 +66,7 @@ fn draw_help(frame: &mut Frame, app: &App) {
         ("P", "Publish message"),
         ("x", "Purge queue"),
         ("D", "Delete queue"),
+        ("i", "Queue info (stats, config)"),
         ("C", "Copy messages to queue"),
         ("m", "Move messages to queue"),
         ("spc", "Select message (list)"),
@@ -524,4 +526,95 @@ fn draw_operation_progress(frame: &mut Frame, app: &App) {
         Paragraph::new(lines).block(block).style(Style::default().bg(app.theme.bg)),
         popup_area,
     );
+}
+
+fn draw_queue_info(frame: &mut Frame, app: &App) {
+    let popup_area = centered_rect(70, 75, frame.area());
+    frame.render_widget(Clear, popup_area);
+
+    let title = format!(" Queue Info: {} ", app.queue_info_name);
+    let block = Block::bordered()
+        .title(title.as_str())
+        .title_style(Style::default().fg(app.theme.accent).bold())
+        .border_style(Style::default().fg(app.theme.accent))
+        .style(Style::default().bg(app.theme.bg));
+
+    let inner = block.inner(popup_area);
+    frame.render_widget(block, popup_area);
+
+    if app.queue_detail.is_empty() {
+        let loading = Paragraph::new(Line::from(Span::styled(
+            "  Loading...",
+            Style::default().fg(app.theme.muted),
+        ))).style(Style::default().bg(app.theme.bg));
+        frame.render_widget(loading, inner);
+        return;
+    }
+
+    // Build all lines from sections
+    let mut lines: Vec<Line> = Vec::new();
+    let key_style = Style::default().fg(app.theme.muted);
+    let value_style = Style::default().fg(app.theme.primary);
+    let section_style = Style::default().fg(app.theme.accent).bold();
+    let bar_filled_style = Style::default().fg(app.theme.accent);
+    let bar_empty_style = Style::default().fg(app.theme.divider);
+
+    // Find max rate across all sections for scaling bars
+    let max_rate = app.queue_detail.iter()
+        .flat_map(|s| s.entries.iter())
+        .filter_map(|e| e.rate_value)
+        .fold(0.0f64, f64::max);
+
+    for section in &app.queue_detail {
+        if !lines.is_empty() {
+            lines.push(Line::from(""));
+        }
+
+        // Section header with decorative line
+        let header_text = format!(" {} ", section.title);
+        let remaining = inner.width.saturating_sub(header_text.len() as u16 + 4) as usize;
+        let separator = "─".repeat(remaining);
+        lines.push(Line::from(vec![
+            Span::styled("  ── ", Style::default().fg(app.theme.divider)),
+            Span::styled(header_text, section_style),
+            Span::styled(separator, Style::default().fg(app.theme.divider)),
+        ]));
+
+        for entry in &section.entries {
+            let mut spans = vec![
+                Span::styled(format!("  {:<18} ", entry.key), key_style),
+                Span::styled(&entry.value, value_style),
+            ];
+
+            // Rate bar
+            if let Some(rate) = entry.rate_value {
+                if max_rate > 0.0 {
+                    let bar_width: usize = 12;
+                    let filled = ((rate / max_rate) * bar_width as f64).round() as usize;
+                    let empty = bar_width.saturating_sub(filled);
+                    spans.push(Span::styled("  ", Style::default()));
+                    spans.push(Span::styled("█".repeat(filled), bar_filled_style));
+                    spans.push(Span::styled("░".repeat(empty), bar_empty_style));
+                }
+            }
+
+            lines.push(Line::from(spans));
+        }
+    }
+
+    // Footer
+    lines.push(Line::from(""));
+    lines.push(Line::from(vec![
+        Span::styled("  j/k", Style::default().fg(app.theme.accent).bold()),
+        Span::styled(":scroll  ", Style::default().fg(app.theme.muted)),
+        Span::styled("esc", Style::default().fg(app.theme.accent).bold()),
+        Span::styled(":close", Style::default().fg(app.theme.muted)),
+    ]));
+
+    // Apply scroll
+    let scroll = app.queue_info_scroll;
+    let content = Paragraph::new(lines)
+        .style(Style::default().bg(app.theme.bg))
+        .scroll((scroll, 0));
+    frame.render_widget(content, inner);
 }

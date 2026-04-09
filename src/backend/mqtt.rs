@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 
 use rumqttc::{Client, Event, MqttOptions, Packet, QoS, TlsConfiguration, Transport};
 
-use super::{Backend, BrokerInfo, MessageInfo, QueueInfo};
+use super::{Backend, BrokerInfo, DetailEntry, DetailSection, MessageInfo, QueueInfo};
 use crate::config::Profile;
 
 pub struct MqttBackend {
@@ -303,6 +303,31 @@ impl Backend for MqttBackend {
             return Err("Failed to connect to MQTT broker".into());
         }
         Ok(())
+    }
+
+    fn queue_detail(&self, _namespace: &str, queue: &str) -> Result<Vec<DetailSection>, String> {
+        let mut sections = Vec::new();
+
+        let mut general = Vec::new();
+        general.push(DetailEntry::kv("Topic", queue));
+        general.push(DetailEntry::kv("Broker", format!("{}:{}", self.host, self.port)));
+        general.push(DetailEntry::kv("Protocol", if self.tls { "mqtts" } else { "mqtt" }));
+        if !self.username.is_empty() {
+            general.push(DetailEntry::kv("Auth", "username/password"));
+        }
+        sections.push(DetailSection { title: "General".into(), entries: general });
+
+        let mut notes = Vec::new();
+        notes.push(DetailEntry::kv("Note", "MQTT topics are ephemeral — no server-side stats available"));
+        notes.push(DetailEntry::kv("Peek mode", "Destructive (subscription-based)"));
+        if let Some(ref topics) = self.topics {
+            notes.push(DetailEntry::kv("Configured topics", topics.join(", ")));
+        } else {
+            notes.push(DetailEntry::kv("Discovery", "Wildcard # subscription (3s scan)"));
+        }
+        sections.push(DetailSection { title: "Notes".into(), entries: notes });
+
+        Ok(sections)
     }
 
     fn clone_backend(&self) -> Box<dyn Backend> {

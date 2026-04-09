@@ -9,7 +9,7 @@ use rdkafka::message::{Headers, Message};
 use rdkafka::TopicPartitionList;
 use rdkafka::Offset;
 
-use super::{Backend, BrokerInfo, MessageInfo, QueueInfo};
+use super::{Backend, BrokerInfo, DetailEntry, DetailSection, MessageInfo, QueueInfo};
 use crate::config::Profile;
 
 pub struct KafkaBackend {
@@ -474,6 +474,108 @@ impl Backend for KafkaBackend {
         })
     }
 
+    fn queue_detail(&self, _namespace: &str, queue: &str) -> Result<Vec<DetailSection>, String> {
+        use rdkafka::admin::{AdminOptions, ResourceSpecifier};
+
+        let admin = self.make_admin()?;
+        let metadata = admin
+            .inner()
+            .fetch_metadata(Some(queue), Duration::from_secs(10))
+            .map_err(|e| format!("Fetching topic metadata: {}", e))?;
+
+        let topic_metadata = metadata
+            .topics()
+            .first()
+            .ok_or_else(|| format!("Topic '{}' not found", queue))?;
+
+        let mut sections = Vec::new();
+
+        // General
+        let mut general = Vec::new();
+        general.push(DetailEntry::kv("Partitions", topic_metadata.partitions().len().to_string()));
+
+        let mut total_messages: u64 = 0;
+        let consumer: BaseConsumer = self.base_config()
+            .set("group.id", "queuepeek-detail")
+            .create()
+            .map_err(|e| format!("Creating consumer: {}", e))?;
+
+        for partition in topic_metadata.partitions() {
+            if let Ok((low, high)) = consumer.fetch_watermarks(queue, partition.id(), Duration::from_secs(5)) {
+                total_messages += (high - low) as u64;
+            }
+        }
+        general.push(DetailEntry::kv("Total messages", format!("{}", total_messages)));
+        sections.push(DetailSection { title: "General".into(), entries: general });
+
+        // Partitions
+        let mut partitions = Vec::new();
+        for partition in topic_metadata.partitions() {
+            let pid = partition.id();
+            let leader = partition.leader();
+            let replicas: Vec<String> = partition.replicas().iter().map(|r| r.to_string()).collect();
+            let isr: Vec<String> = partition.isr().iter().map(|r| r.to_string()).collect();
+
+            let watermark = consumer.fetch_watermarks(queue, pid, Duration::from_secs(5))
+                .map(|(low, high)| format!("{} msgs (offsets {}..{})", high - low, low, high))
+                .unwrap_or_else(|_| "unknown".to_string());
+
+            partitions.push(DetailEntry::kv(
+                format!("Partition {}", pid),
+                format!("leader={} replicas=[{}] ISR=[{}] {}", leader, replicas.join(","), isr.join(","), watermark),
+            ));
+        }
+        if !partitions.is_empty() {
+            sections.push(DetailSection { title: "Partitions".into(), entries: partitions });
+        }
+
+        // Topic config via describe_configs
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .map_err(|e| format!("Creating runtime: {}", e))?;
+
+        let config_result = rt.block_on(async {
+            let opts = AdminOptions::new();
+            let resource = ResourceSpecifier::Topic(queue);
+            admin.describe_configs(&[resource], &opts).await
+                .map_err(|e| format!("Describing config: {}", e))
+        });
+
+        if let Ok(configs) = config_result {
+            let mut config_entries = Vec::new();
+            for config in configs {
+                if let Ok(resource) = config {
+                    // Show non-default, interesting config entries
+                    let interesting = [
+                        "retention.ms", "retention.bytes", "cleanup.policy",
+                        "compression.type", "segment.bytes", "max.message.bytes",
+                        "min.insync.replicas", "replication.factor",
+                    ];
+                    for key in &interesting {
+                        if let Some(entry) = resource.get(key) {
+                            if let Some(ref value) = entry.value {
+                                let display_value = if *key == "retention.ms" {
+                                    format_duration_ms(value)
+                                } else if *key == "segment.bytes" || *key == "retention.bytes" || *key == "max.message.bytes" {
+                                    format_config_bytes(value)
+                                } else {
+                                    value.clone()
+                                };
+                                config_entries.push(DetailEntry::kv(*key, display_value));
+                            }
+                        }
+                    }
+                }
+            }
+            if !config_entries.is_empty() {
+                sections.push(DetailSection { title: "Configuration".into(), entries: config_entries });
+            }
+        }
+
+        Ok(sections)
+    }
+
     fn clone_backend(&self) -> Box<dyn Backend> {
         Box::new(Self {
             broker: self.broker.clone(),
@@ -484,5 +586,31 @@ impl Backend for KafkaBackend {
             tls_cert: self.tls_cert.clone(),
             tls_key: self.tls_key.clone(),
         })
+    }
+}
+
+fn format_duration_ms(ms_str: &str) -> String {
+    if let Ok(ms) = ms_str.parse::<i64>() {
+        if ms < 0 { return "infinite".to_string(); }
+        let secs = ms / 1000;
+        if secs >= 86400 { format!("{}d", secs / 86400) }
+        else if secs >= 3600 { format!("{}h", secs / 3600) }
+        else if secs >= 60 { format!("{}m", secs / 60) }
+        else { format!("{}s", secs) }
+    } else {
+        ms_str.to_string()
+    }
+}
+
+fn format_config_bytes(bytes_str: &str) -> String {
+    if let Ok(bytes) = bytes_str.parse::<i64>() {
+        if bytes < 0 { return "infinite".to_string(); }
+        let bytes = bytes as u64;
+        if bytes >= 1_073_741_824 { format!("{:.1} GB", bytes as f64 / 1_073_741_824.0) }
+        else if bytes >= 1_048_576 { format!("{:.1} MB", bytes as f64 / 1_048_576.0) }
+        else if bytes >= 1_024 { format!("{:.1} KB", bytes as f64 / 1_024.0) }
+        else { format!("{} B", bytes) }
+    } else {
+        bytes_str.to_string()
     }
 }

@@ -3,7 +3,7 @@ use serde::Deserialize;
 use std::sync::Arc;
 use std::time::Duration;
 
-use super::{Backend, BrokerInfo, MessageInfo, QueueInfo};
+use super::{Backend, BrokerInfo, DetailEntry, DetailSection, MessageInfo, QueueInfo};
 use crate::config::Profile;
 
 // API response structs (same as current rabbit.rs)
@@ -356,6 +356,133 @@ impl Backend for RabbitMqBackend {
         }).collect())
     }
 
+    fn queue_detail(&self, namespace: &str, queue: &str) -> Result<Vec<DetailSection>, String> {
+        let encoded_ns = urlencoding::encode(namespace);
+        let encoded_q = urlencoding::encode(queue);
+        let path = format!("/api/queues/{}/{}", encoded_ns, encoded_q);
+        let data: serde_json::Value = self.get(&path)?;
+
+        let mut sections = Vec::new();
+
+        // General
+        let mut general = Vec::new();
+        if let Some(t) = data.get("type").and_then(|v| v.as_str()) {
+            general.push(DetailEntry::kv("Type", t));
+        }
+        if let Some(s) = data.get("state").and_then(|v| v.as_str()) {
+            general.push(DetailEntry::kv("State", s));
+        }
+        if let Some(n) = data.get("node").and_then(|v| v.as_str()) {
+            general.push(DetailEntry::kv("Node", n));
+        }
+        if let Some(v) = data.get("vhost").and_then(|v| v.as_str()) {
+            general.push(DetailEntry::kv("Vhost", v));
+        }
+        if let Some(d) = data.get("durable").and_then(|v| v.as_bool()) {
+            general.push(DetailEntry::kv("Durable", if d { "yes" } else { "no" }));
+        }
+        if let Some(ad) = data.get("auto_delete").and_then(|v| v.as_bool()) {
+            general.push(DetailEntry::kv("Auto-delete", if ad { "yes" } else { "no" }));
+        }
+        if let Some(ex) = data.get("exclusive").and_then(|v| v.as_bool()) {
+            general.push(DetailEntry::kv("Exclusive", if ex { "yes" } else { "no" }));
+        }
+        if let Some(idle) = data.get("idle_since").and_then(|v| v.as_str()) {
+            general.push(DetailEntry::kv("Idle since", idle));
+        }
+        if !general.is_empty() {
+            sections.push(DetailSection { title: "General".into(), entries: general });
+        }
+
+        // Messages
+        let mut messages = Vec::new();
+        if let Some(n) = data.get("messages").and_then(|v| v.as_u64()) {
+            messages.push(DetailEntry::kv("Total", format_number(n)));
+        }
+        if let Some(n) = data.get("messages_ready").and_then(|v| v.as_u64()) {
+            messages.push(DetailEntry::kv("Ready", format_number(n)));
+        }
+        if let Some(n) = data.get("messages_unacknowledged").and_then(|v| v.as_u64()) {
+            messages.push(DetailEntry::kv("Unacked", format_number(n)));
+        }
+        if !messages.is_empty() {
+            sections.push(DetailSection { title: "Messages".into(), entries: messages });
+        }
+
+        // Consumers
+        let mut consumers = Vec::new();
+        if let Some(n) = data.get("consumers").and_then(|v| v.as_u64()) {
+            consumers.push(DetailEntry::kv("Count", format_number(n)));
+        }
+        if let Some(utilisation) = data.get("consumer_utilisation").and_then(|v| v.as_f64()) {
+            consumers.push(DetailEntry::kv("Utilisation", format!("{:.1}%", utilisation * 100.0)));
+        }
+        if !consumers.is_empty() {
+            sections.push(DetailSection { title: "Consumers".into(), entries: consumers });
+        }
+
+        // Rates
+        let mut rates = Vec::new();
+        if let Some(ms) = data.get("message_stats") {
+            let pub_rate = ms.get("publish_details").and_then(|d| d.get("rate")).and_then(|r| r.as_f64()).unwrap_or(0.0);
+            let del_rate = ms.get("deliver_details").and_then(|d| d.get("rate")).and_then(|r| r.as_f64()).unwrap_or(0.0);
+            let ack_rate = ms.get("ack_details").and_then(|d| d.get("rate")).and_then(|r| r.as_f64()).unwrap_or(0.0);
+            let redel_rate = ms.get("redeliver_details").and_then(|d| d.get("rate")).and_then(|r| r.as_f64()).unwrap_or(0.0);
+
+            rates.push(DetailEntry::rate("Publish", format!("{:.1}/s", pub_rate), pub_rate));
+            rates.push(DetailEntry::rate("Deliver", format!("{:.1}/s", del_rate), del_rate));
+            rates.push(DetailEntry::rate("Ack", format!("{:.1}/s", ack_rate), ack_rate));
+            if redel_rate > 0.0 {
+                rates.push(DetailEntry::rate("Redeliver", format!("{:.1}/s", redel_rate), redel_rate));
+            }
+
+            // Totals
+            if let Some(n) = ms.get("publish").and_then(|v| v.as_u64()) {
+                rates.push(DetailEntry::kv("Total published", format_number(n)));
+            }
+            if let Some(n) = ms.get("deliver").and_then(|v| v.as_u64()) {
+                rates.push(DetailEntry::kv("Total delivered", format_number(n)));
+            }
+            if let Some(n) = ms.get("ack").and_then(|v| v.as_u64()) {
+                rates.push(DetailEntry::kv("Total acked", format_number(n)));
+            }
+        }
+        if !rates.is_empty() {
+            sections.push(DetailSection { title: "Rates".into(), entries: rates });
+        }
+
+        // Memory
+        let mut memory = Vec::new();
+        if let Some(n) = data.get("memory").and_then(|v| v.as_u64()) {
+            memory.push(DetailEntry::kv("Usage", format_bytes(n)));
+        }
+        if !memory.is_empty() {
+            sections.push(DetailSection { title: "Memory".into(), entries: memory });
+        }
+
+        // Policy & Arguments
+        let mut config = Vec::new();
+        if let Some(p) = data.get("policy").and_then(|v| v.as_str()) {
+            if !p.is_empty() {
+                config.push(DetailEntry::kv("Policy", p));
+            }
+        }
+        if let Some(args) = data.get("arguments").and_then(|v| v.as_object()) {
+            for (k, v) in args {
+                let val = match v {
+                    serde_json::Value::String(s) => s.clone(),
+                    other => other.to_string(),
+                };
+                config.push(DetailEntry::kv(k.as_str(), val));
+            }
+        }
+        if !config.is_empty() {
+            sections.push(DetailSection { title: "Configuration".into(), entries: config });
+        }
+
+        Ok(sections)
+    }
+
     fn clone_backend(&self) -> Box<dyn Backend> {
         Box::new(Self {
             client: Arc::clone(&self.client),
@@ -363,5 +490,27 @@ impl Backend for RabbitMqBackend {
             username: self.username.clone(),
             password: self.password.clone(),
         })
+    }
+}
+
+fn format_number(n: u64) -> String {
+    if n >= 1_000_000 {
+        format!("{:.1}M", n as f64 / 1_000_000.0)
+    } else if n >= 1_000 {
+        format!("{:.1}K", n as f64 / 1_000.0)
+    } else {
+        format!("{}", n)
+    }
+}
+
+fn format_bytes(bytes: u64) -> String {
+    if bytes >= 1_073_741_824 {
+        format!("{:.1} GB", bytes as f64 / 1_073_741_824.0)
+    } else if bytes >= 1_048_576 {
+        format!("{:.1} MB", bytes as f64 / 1_048_576.0)
+    } else if bytes >= 1_024 {
+        format!("{:.1} KB", bytes as f64 / 1_024.0)
+    } else {
+        format!("{} B", bytes)
     }
 }

@@ -15,6 +15,11 @@
 - `backend_type()` method on Backend trait for backend-specific behavior
 - MQTT `consume_messages()` as alias for `peek_messages()` (subscriptions are inherently destructive)
   - Enables move, delete selected, copy, and re-publish operations on MQTT
+- Queue info popup (`i` key on queue list) showing detailed queue/topic stats
+  - RabbitMQ: type, state, node, messages (ready/unacked/total), rates with bar charts, memory, consumers, policy, arguments
+  - Kafka: partition details (leader, replicas, ISR, offsets), topic configuration (retention, cleanup policy, compression, etc.)
+  - MQTT: connection info and topic notes
+  - Scrollable with `j`/`k`, close with `Esc`
 
 ### Changed
 - Improved dump for large queues with per-backend strategies:

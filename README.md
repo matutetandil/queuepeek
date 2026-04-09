@@ -39,6 +39,7 @@ queuepeek connects to message broker management APIs and lets you browse queues/
 - Re-publish selected messages to the same queue (useful for retry workflows)
 - Dump entire queue to JSONL file (streaming, low memory, per-backend strategy)
 - Import messages from JSONL or JSON file into the current queue
+- Queue info popup (`i` on queue list) with detailed stats, rates with bar charts, and configuration
 - Stream-based delete uses temp file backup for safe recovery on failure
 - Auto-update check on startup and hourly via GitHub Releases
 
@@ -205,6 +206,7 @@ Press `Esc` or `Backspace` at any screen to go back one level. In the message li
 | `D`          | Delete selected queue/topic (with confirmation)     |
 | `C`          | Copy all messages to another queue (with picker)    |
 | `m`          | Move all messages to another queue (with picker)    |
+| `i`          | Show detailed queue/topic info (stats, config, rates)|
 | `t`          | Open theme picker                                   |
 | `Esc`        | Go back to profile screen                           |
 | `q` / Ctrl+C | Quit                                                |
