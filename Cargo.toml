@@ -1,6 +1,6 @@
 [package]
 name = "queuepeek"
-version = "0.5.0"
+version = "0.6.0"
 edition = "2021"
 description = "A TUI multi-broker message queue inspector"
 
@@ -20,3 +20,6 @@ rumqttc = "0.24"
 uuid = { version = "1", features = ["v4"] }
 self_update = { version = "0.41", features = ["archive-tar", "compression-flate2"] }
 tokio = { version = "1", features = ["rt"] }
+base64 = "0.22"
+flate2 = "1"
+similar = "2"

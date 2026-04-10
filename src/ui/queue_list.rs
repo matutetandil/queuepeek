@@ -145,8 +145,15 @@ fn draw_list(frame: &mut Frame, app: &mut App, area: Rect) {
             };
             let consumers_text = format!("{}c", q.consumers);
 
+            // Sparkline from rate history
+            let sparkline_width = 8;
+            let sparkline_str = app.rate_history.get(&q.name)
+                .map(|h| h.sparkline_str(sparkline_width))
+                .unwrap_or_else(|| " ".repeat(sparkline_width));
+            let has_activity = sparkline_str.trim().len() > 0;
+
             // Right side stats
-            let right = format!("  {}{}  {}  {}", msg_text, rate_text, consumers_text, q.state);
+            let right = format!("  {}{}  {}  {}  {}", msg_text, rate_text, consumers_text, q.state, sparkline_str);
             let right_len = right.len();
 
             // Left side: queue name, truncated if needed
@@ -183,6 +190,10 @@ fn draw_list(frame: &mut Frame, app: &mut App, area: Rect) {
                 Span::styled(
                     format!("  {}", q.state),
                     Style::default().fg(if q.state == "running" { app.theme.success } else { app.theme.muted }),
+                ),
+                Span::styled(
+                    format!(" {}", sparkline_str),
+                    Style::default().fg(if has_activity { app.theme.accent } else { app.theme.muted }),
                 ),
             ]);
 

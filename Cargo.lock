@@ -1505,11 +1505,13 @@ checksum = "b5a041e753da8b807c9255f28de81879c78c876392ff2469cde94799b2896b9d"
 
 [[package]]
 name = "queuepeek"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "arboard",
+ "base64",
  "crossterm",
  "dirs",
+ "flate2",
  "ratatui",
  "rdkafka",
  "reqwest",
@@ -1517,6 +1519,7 @@ dependencies = [
  "self_update",
  "serde",
  "serde_json",
+ "similar",
  "tokio",
  "toml",
  "tui-input",
@@ -2092,6 +2095,12 @@ name = "simd-adler32"
 version = "0.3.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "703d5c7ef118737c72f1af64ad2f6f8c5e1921f818cdcb97b8fe6fc69bf66214"
+
+[[package]]
+name = "similar"
+version = "2.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bbbb5d9659141646ae647b42fe094daf6c6192d1620870b449d9557f748b2daa"
 
 [[package]]
 name = "slab"

@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::mpsc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -30,6 +30,10 @@ pub enum BgResult {
     ConsumerGroups(Result<Vec<ConsumerGroupInfo>, String>),
     OffsetReset(Result<String, String>),
     ScheduledPublished { id: u64, result: Result<(), String> },
+    ReplayComplete(Result<u64, String>),
+    Topology(Result<(Vec<crate::backend::ExchangeInfo>, Vec<crate::backend::BindingInfo>), String>),
+    BenchmarkProgress { completed: u32, total: u32, latency_ms: u64 },
+    BenchmarkComplete { total: u32, errors: u32, elapsed_ms: u64, avg_latency_ms: u64 },
     CompareMessages {
         queue_a: String,
         queue_b: String,
@@ -75,6 +79,15 @@ pub enum Popup {
     ScheduledMessages,
     CompareQueuePicker,
     CompareResults,
+    MessageDiff,
+    SavedFilters,
+    SaveFilter,
+    TemplatePicker,
+    SaveTemplate,
+    ReplayConfig,
+    TopologyView,
+    BenchmarkConfig,
+    BenchmarkRunning,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -107,6 +120,51 @@ pub enum ComparisonTab {
     Summary,
     OnlyInA,
     OnlyInB,
+}
+
+pub struct RateHistory {
+    pub publish: VecDeque<f64>,
+    pub deliver: VecDeque<f64>,
+}
+
+impl RateHistory {
+    pub fn new() -> Self {
+        Self {
+            publish: VecDeque::with_capacity(60),
+            deliver: VecDeque::with_capacity(60),
+        }
+    }
+
+    pub fn push(&mut self, publish_rate: f64, deliver_rate: f64) {
+        if self.publish.len() >= 60 { self.publish.pop_front(); }
+        if self.deliver.len() >= 60 { self.deliver.pop_front(); }
+        self.publish.push_back(publish_rate);
+        self.deliver.push_back(deliver_rate);
+    }
+
+    pub fn sparkline_str(&self, width: usize) -> String {
+        let blocks = [' ', '\u{2581}', '\u{2582}', '\u{2583}', '\u{2584}', '\u{2585}', '\u{2586}', '\u{2587}', '\u{2588}'];
+        let data = &self.publish;
+        if data.is_empty() { return " ".repeat(width); }
+
+        let max = data.iter().cloned().fold(0.0f64, f64::max).max(0.1);
+        let start = if data.len() > width { data.len() - width } else { 0 };
+        let mut result = String::new();
+        let pad = width.saturating_sub(data.len().min(width));
+        for _ in 0..pad { result.push(' '); }
+        for &v in data.range(start..) {
+            let idx = ((v / max) * 7.0).round() as usize;
+            result.push(blocks[idx.min(8)]);
+        }
+        result
+    }
+}
+
+pub struct BenchmarkStats {
+    pub total: u32,
+    pub errors: u32,
+    pub elapsed_ms: u64,
+    pub avg_latency_ms: u64,
 }
 
 pub struct ScheduledMessage {
@@ -161,6 +219,7 @@ pub struct App {
     pub current_queue_name: String,
     pub message_filter: String,
     pub message_filter_active: bool,
+    pub message_filter_advanced: bool,
     pub filtered_message_indices: Vec<usize>,
 
     // Message selection (multi-select)
@@ -170,6 +229,11 @@ pub struct App {
     pub detail_message_idx: usize,
     pub detail_scroll: u16,
     pub detail_pretty: bool,
+    pub detail_decoded: bool,
+
+    // Message diff
+    pub diff_messages: Option<(MessageInfo, MessageInfo)>,
+    pub diff_scroll: u16,
 
     // Shared
     pub fetch_count: u32,
@@ -214,6 +278,36 @@ pub struct App {
     pub reset_group_name: String,
     pub reset_strategy: Option<OffsetResetStrategy>,
     pub reset_input: String,
+
+    // Saved filter input
+    pub save_filter_name: String,
+    pub saved_filter_list_state: ListState,
+
+    // Templates
+    pub template_list_state: ListState,
+    pub save_template_name: String,
+    pub template_counter: u64,
+
+    // Replay config
+    pub replay_start: String,
+    pub replay_end: String,
+    pub replay_dest: String,
+    pub replay_focused_field: usize,
+
+    // Topology
+    pub topology_exchanges: Vec<crate::backend::ExchangeInfo>,
+    pub topology_bindings: Vec<crate::backend::BindingInfo>,
+    pub topology_scroll: u16,
+
+    // Benchmark
+    pub bench_count: String,
+    pub bench_concurrency: String,
+    pub bench_focused_field: usize,
+    pub bench_stats: Option<BenchmarkStats>,
+    pub bench_progress: (u32, u32),
+
+    // Rate history for sparklines
+    pub rate_history: HashMap<String, RateHistory>,
 
     // Queue comparison
     pub compare_queue_a: String,
@@ -507,11 +601,15 @@ impl App {
             current_queue_name: String::new(),
             message_filter: String::new(),
             message_filter_active: false,
+            message_filter_advanced: false,
             filtered_message_indices: Vec::new(),
             selected_messages: HashSet::new(),
             detail_message_idx: 0,
             detail_scroll: 0,
             detail_pretty: true,
+            detail_decoded: false,
+            diff_messages: None,
+            diff_scroll: 0,
             fetch_count: 50,
             status_message: String::new(),
             status_is_error: false,
@@ -536,6 +634,24 @@ impl App {
             reset_group_name: String::new(),
             reset_strategy: None,
             reset_input: String::new(),
+            replay_start: String::new(),
+            replay_end: String::new(),
+            replay_dest: String::new(),
+            replay_focused_field: 0,
+            topology_exchanges: Vec::new(),
+            topology_bindings: Vec::new(),
+            topology_scroll: 0,
+            bench_count: "1000".to_string(),
+            bench_concurrency: "1".to_string(),
+            bench_focused_field: 0,
+            bench_stats: None,
+            bench_progress: (0, 0),
+            save_filter_name: String::new(),
+            saved_filter_list_state: ListState::default(),
+            template_list_state: ListState::default(),
+            save_template_name: String::new(),
+            template_counter: 0,
+            rate_history: HashMap::new(),
             compare_queue_a: String::new(),
             comparison_result: None,
             comparison_tab: ComparisonTab::Summary,
@@ -1191,6 +1307,119 @@ impl App {
         }
     }
 
+    pub fn do_replay(&self) {
+        if let Some(ref backend) = self.backend {
+            let backend = backend.clone_backend();
+            let namespace = self.selected_namespace.clone();
+            let topic = self.current_queue_name.clone();
+            let start: i64 = self.replay_start.parse().unwrap_or(0);
+            let end: i64 = self.replay_end.parse().unwrap_or(0);
+            let dest = self.replay_dest.clone();
+            let tx = self.bg_sender.clone();
+            std::thread::spawn(move || {
+                let result = backend.replay_messages(&namespace, &topic, start, end, &dest);
+                let _ = tx.send(BgResult::ReplayComplete(result));
+            });
+        }
+    }
+
+    pub fn load_topology(&self) {
+        if let Some(ref backend) = self.backend {
+            let backend = backend.clone_backend();
+            let namespace = self.selected_namespace.clone();
+            let tx = self.bg_sender.clone();
+            std::thread::spawn(move || {
+                let exchanges = backend.list_exchanges(&namespace);
+                let bindings = backend.list_bindings(&namespace);
+                let result = match (exchanges, bindings) {
+                    (Ok(e), Ok(b)) => Ok((e, b)),
+                    (Err(e), _) => Err(e),
+                    (_, Err(e)) => Err(e),
+                };
+                let _ = tx.send(BgResult::Topology(result));
+            });
+        }
+    }
+
+    pub fn do_benchmark(&mut self) {
+        if let Some(ref backend) = self.backend {
+            let backend = backend.clone_backend();
+            let namespace = self.selected_namespace.clone();
+            let queue = self.selected_queue().map(|q| q.name.clone()).unwrap_or_default();
+            let count: u32 = self.bench_count.parse().unwrap_or(1000);
+            let concurrency: u32 = self.bench_concurrency.parse().unwrap_or(1).max(1);
+            let tx = self.bg_sender.clone();
+            let cancel = self.operation_cancel.clone();
+            cancel.store(false, std::sync::atomic::Ordering::Relaxed);
+            self.bench_progress = (0, count);
+            self.bench_stats = None;
+            self.popup = Popup::BenchmarkRunning;
+
+            // Use the publish form body as message template, or a default
+            let body = if self.publish_form.body.is_empty() {
+                format!("{{\"benchmark\": true, \"timestamp\": {}}}", "{{timestamp}}")
+            } else {
+                self.publish_form.body.clone()
+            };
+            let routing_key = if self.publish_form.routing_key.is_empty() {
+                queue.clone()
+            } else {
+                self.publish_form.routing_key.clone()
+            };
+            let content_type = if self.publish_form.content_type.is_empty() {
+                "application/json".to_string()
+            } else {
+                self.publish_form.content_type.clone()
+            };
+
+            std::thread::spawn(move || {
+                let start = Instant::now();
+                let per_thread = count / concurrency;
+                let mut total_completed = 0u32;
+                let mut total_errors = 0u32;
+                let mut total_latency_ms = 0u64;
+
+                // Simple sequential approach (concurrency handled by fast publishing)
+                for i in 0..count {
+                    if cancel.load(std::sync::atomic::Ordering::Relaxed) {
+                        break;
+                    }
+                    let msg_start = Instant::now();
+                    let result = backend.publish_message(
+                        &namespace, &queue, &body, &routing_key, &[], &content_type,
+                    );
+                    let latency = msg_start.elapsed().as_millis() as u64;
+                    total_latency_ms += latency;
+
+                    match result {
+                        Ok(()) => total_completed += 1,
+                        Err(_) => total_errors += 1,
+                    }
+
+                    if i % 10 == 0 {
+                        let _ = tx.send(BgResult::BenchmarkProgress {
+                            completed: total_completed + total_errors,
+                            total: count,
+                            latency_ms: latency,
+                        });
+                    }
+                }
+
+                let elapsed = start.elapsed().as_millis() as u64;
+                let avg_latency = if total_completed > 0 {
+                    total_latency_ms / total_completed as u64
+                } else { 0 };
+
+                let _ = tx.send(BgResult::BenchmarkComplete {
+                    total: total_completed,
+                    errors: total_errors,
+                    elapsed_ms: elapsed,
+                    avg_latency_ms: avg_latency,
+                });
+            });
+        }
+    }
+
     pub fn load_comparison(&self, queue_a: &str, queue_b: &str) {
         if let Some(ref backend) = self.backend {
             let backend = backend.clone_backend();
@@ -1441,6 +1670,14 @@ impl App {
                             let previously_selected = self.selected_queue()
                                 .map(|q| q.name.clone());
 
+                            // Record rate history for sparklines
+                            for q in &queues {
+                                let history = self.rate_history
+                                    .entry(q.name.clone())
+                                    .or_insert_with(RateHistory::new);
+                                history.push(q.publish_rate, q.deliver_rate);
+                            }
+
                             self.set_status(format!("{} queues loaded", queues.len()), false);
                             self.queues = queues;
                             self.update_filtered_queues();
@@ -1538,6 +1775,37 @@ impl App {
                     self.loading = false;
                     self.set_status(format!("Consumer groups: {}", e), true);
                 }
+                BgResult::ReplayComplete(Ok(count)) => {
+                    self.popup = Popup::None;
+                    self.set_status(format!("Replayed {} messages", count), false);
+                }
+                BgResult::ReplayComplete(Err(e)) => {
+                    self.popup = Popup::None;
+                    self.set_status(format!("Replay failed: {}", e), true);
+                }
+                BgResult::Topology(Ok((exchanges, bindings))) => {
+                    self.topology_exchanges = exchanges;
+                    self.topology_bindings = bindings;
+                    self.topology_scroll = 0;
+                    self.loading = false;
+                }
+                BgResult::Topology(Err(e)) => {
+                    self.popup = Popup::None;
+                    self.loading = false;
+                    self.set_status(format!("Topology: {}", e), true);
+                }
+                BgResult::BenchmarkProgress { completed, total, latency_ms: _ } => {
+                    self.bench_progress = (completed, total);
+                }
+                BgResult::BenchmarkComplete { total, errors, elapsed_ms, avg_latency_ms } => {
+                    self.bench_stats = Some(BenchmarkStats { total, errors, elapsed_ms, avg_latency_ms });
+                    let msgs_per_sec = if elapsed_ms > 0 { total as f64 / (elapsed_ms as f64 / 1000.0) } else { 0.0 };
+                    self.set_status(
+                        format!("Benchmark: {} msgs in {}ms ({:.0} msg/s, avg {}ms, {} errors)",
+                            total, elapsed_ms, msgs_per_sec, avg_latency_ms, errors),
+                        errors > 0,
+                    );
+                }
                 BgResult::CompareMessages { queue_a, queue_b, messages_a, messages_b } => {
                     self.loading = false;
                     match (messages_a, messages_b) {
@@ -1610,14 +1878,26 @@ impl App {
 
     pub fn update_filtered_messages(&mut self) {
         let filter = self.message_filter.to_lowercase();
-        self.filtered_message_indices = self.messages.iter().enumerate()
-            .filter(|(_, m)| {
-                filter.is_empty()
-                    || m.body.to_lowercase().contains(&filter)
-                    || m.routing_key.to_lowercase().contains(&filter)
-            })
-            .map(|(i, _)| i)
-            .collect();
+        if filter.is_empty() {
+            self.filtered_message_indices = (0..self.messages.len()).collect();
+            return;
+        }
+
+        if self.message_filter_advanced {
+            let expr = parse_filter_expr(&self.message_filter);
+            self.filtered_message_indices = self.messages.iter().enumerate()
+                .filter(|(_, m)| eval_filter_expr(&expr, m))
+                .map(|(i, _)| i)
+                .collect();
+        } else {
+            self.filtered_message_indices = self.messages.iter().enumerate()
+                .filter(|(_, m)| {
+                    m.body.to_lowercase().contains(&filter)
+                        || m.routing_key.to_lowercase().contains(&filter)
+                })
+                .map(|(i, _)| i)
+                .collect();
+        }
     }
 
     pub fn selected_queue(&self) -> Option<&QueueInfo> {
@@ -1630,6 +1910,111 @@ impl App {
         let selected = self.message_list_state.selected()?;
         let idx = *self.filtered_message_indices.get(selected)?;
         self.messages.get(idx)
+    }
+}
+
+/// Filter expression for advanced message filtering
+#[derive(Debug)]
+enum FilterExpr {
+    Substring(String),
+    FieldEquals { field: String, value: String },
+    FieldContains { field: String, value: String },
+    FieldNotEquals { field: String, value: String },
+}
+
+/// Parse a filter expression string into a FilterExpr.
+/// Supported syntax:
+///   header.key = "value"    — exact match on header
+///   body contains "text"    — substring match in body
+///   routing_key = "value"   — exact match on routing_key
+///   body.field = "value"    — JSON field match in body
+///   field != "value"        — not-equals
+fn parse_filter_expr(input: &str) -> FilterExpr {
+    let input = input.trim();
+
+    // Try "field contains value"
+    if let Some(idx) = input.to_lowercase().find(" contains ") {
+        let field = input[..idx].trim().to_string();
+        let value = input[idx + 10..].trim().trim_matches('"').to_string();
+        return FilterExpr::FieldContains { field, value };
+    }
+
+    // Try "field != value"
+    if let Some(idx) = input.find("!=") {
+        let field = input[..idx].trim().to_string();
+        let value = input[idx + 2..].trim().trim_matches('"').to_string();
+        return FilterExpr::FieldNotEquals { field, value };
+    }
+
+    // Try "field = value"
+    if let Some(idx) = input.find('=') {
+        let field = input[..idx].trim().to_string();
+        let value = input[idx + 1..].trim().trim_matches('"').to_string();
+        return FilterExpr::FieldEquals { field, value };
+    }
+
+    // Fallback to substring
+    FilterExpr::Substring(input.to_lowercase())
+}
+
+/// Resolve a field path to a value from a MessageInfo
+fn resolve_field(field: &str, msg: &MessageInfo) -> String {
+    match field {
+        "body" => msg.body.clone(),
+        "routing_key" => msg.routing_key.clone(),
+        "exchange" => msg.exchange.clone(),
+        "content_type" => msg.content_type.clone(),
+        "redelivered" => msg.redelivered.to_string(),
+        _ if field.starts_with("header.") || field.starts_with("headers.") => {
+            let key = field.splitn(2, '.').nth(1).unwrap_or("");
+            msg.headers.iter()
+                .find(|(k, _)| k.to_lowercase() == key.to_lowercase())
+                .map(|(_, v)| v.clone())
+                .unwrap_or_default()
+        }
+        _ if field.starts_with("body.") => {
+            // JSON path lookup in body
+            let path = field.splitn(2, '.').nth(1).unwrap_or("");
+            if let Ok(val) = serde_json::from_str::<serde_json::Value>(&msg.body) {
+                let parts: Vec<&str> = path.split('.').collect();
+                let mut current = &val;
+                for part in &parts {
+                    if let Some(next) = current.get(part) {
+                        current = next;
+                    } else {
+                        return String::new();
+                    }
+                }
+                match current {
+                    serde_json::Value::String(s) => s.clone(),
+                    other => other.to_string(),
+                }
+            } else {
+                String::new()
+            }
+        }
+        _ => String::new(),
+    }
+}
+
+fn eval_filter_expr(expr: &FilterExpr, msg: &MessageInfo) -> bool {
+    match expr {
+        FilterExpr::Substring(s) => {
+            msg.body.to_lowercase().contains(s)
+                || msg.routing_key.to_lowercase().contains(s)
+        }
+        FilterExpr::FieldEquals { field, value } => {
+            let resolved = resolve_field(field, msg);
+            resolved.to_lowercase() == value.to_lowercase()
+        }
+        FilterExpr::FieldContains { field, value } => {
+            let resolved = resolve_field(field, msg);
+            resolved.to_lowercase().contains(&value.to_lowercase())
+        }
+        FilterExpr::FieldNotEquals { field, value } => {
+            let resolved = resolve_field(field, msg);
+            resolved.to_lowercase() != value.to_lowercase()
+        }
     }
 }
 

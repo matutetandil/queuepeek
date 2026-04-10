@@ -674,6 +674,67 @@ impl Backend for KafkaBackend {
         Ok(sections)
     }
 
+    fn replay_messages(
+        &self,
+        _namespace: &str,
+        topic: &str,
+        start_offset: i64,
+        end_offset: i64,
+        dest_topic: &str,
+    ) -> Result<u64, String> {
+        use rdkafka::producer::{BaseProducer, BaseRecord};
+
+        let group_id = format!("queuepeek-replay-{}", uuid::Uuid::new_v4());
+        let consumer = self.make_consumer(&group_id)?;
+
+        let metadata = consumer
+            .fetch_metadata(Some(topic), Duration::from_secs(10))
+            .map_err(|e| format!("Fetching metadata: {}", e))?;
+
+        let topic_metadata = metadata.topics().first()
+            .ok_or_else(|| "Topic not found".to_string())?;
+
+        // Assign all partitions from start_offset
+        let mut tpl = TopicPartitionList::new();
+        for partition in topic_metadata.partitions() {
+            tpl.add_partition_offset(topic, partition.id(), Offset::Offset(start_offset))
+                .map_err(|e| format!("Setting offset: {}", e))?;
+        }
+        consumer.assign(&tpl).map_err(|e| format!("Assigning: {}", e))?;
+
+        let producer: BaseProducer = self.base_config()
+            .set("message.timeout.ms", "5000")
+            .create()
+            .map_err(|e| format!("Creating producer: {}", e))?;
+
+        let mut replayed = 0u64;
+        let deadline = std::time::Instant::now() + Duration::from_secs(60);
+
+        while std::time::Instant::now() < deadline {
+            match consumer.poll(Duration::from_millis(500)) {
+                Some(Ok(msg)) => {
+                    if end_offset > 0 && msg.offset() >= end_offset {
+                        break;
+                    }
+                    let payload = msg.payload().unwrap_or(&[]);
+                    let key: &[u8] = &[];
+                    let record = BaseRecord::to(dest_topic).payload(payload).key(key);
+                    producer.send(record).map_err(|(e, _)| format!("Send: {}", e))?;
+                    replayed += 1;
+                }
+                Some(Err(e)) => return Err(format!("Consuming: {}", e)),
+                None => {
+                    if replayed > 0 { break; }
+                }
+            }
+        }
+
+        producer.flush(Duration::from_secs(5))
+            .map_err(|e| format!("Flush: {}", e))?;
+
+        Ok(replayed)
+    }
+
     fn reset_consumer_group_offsets(
         &self,
         _namespace: &str,

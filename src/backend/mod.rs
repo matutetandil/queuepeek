@@ -85,6 +85,23 @@ pub enum OffsetResetStrategy {
     ToOffset(i64),        // specific offset (applied to all partitions)
 }
 
+/// Exchange info for topology view
+#[derive(Debug, Clone)]
+pub struct ExchangeInfo {
+    pub name: String,
+    pub exchange_type: String,
+    pub durable: bool,
+}
+
+/// Binding info for topology view
+#[derive(Debug, Clone)]
+pub struct BindingInfo {
+    pub source: String,
+    pub destination: String,
+    pub routing_key: String,
+    pub destination_type: String,
+}
+
 /// Generic backend trait — implement for each broker type
 pub trait Backend: Send {
     fn backend_type(&self) -> &str;
@@ -143,6 +160,28 @@ pub trait Backend: Send {
     /// Get detailed queue/topic information as structured sections
     fn queue_detail(&self, _namespace: &str, _queue: &str) -> Result<Vec<DetailSection>, String> {
         Err("Queue detail not supported by this backend".into())
+    }
+
+    /// List exchanges in namespace (for topology view)
+    fn list_exchanges(&self, _namespace: &str) -> Result<Vec<ExchangeInfo>, String> {
+        Err("Exchange listing not supported by this backend".into())
+    }
+
+    /// List bindings in namespace (for topology view)
+    fn list_bindings(&self, _namespace: &str) -> Result<Vec<BindingInfo>, String> {
+        Err("Binding listing not supported by this backend".into())
+    }
+
+    /// Replay messages from offset range to destination
+    fn replay_messages(
+        &self,
+        _namespace: &str,
+        _topic: &str,
+        _start_offset: i64,
+        _end_offset: i64,
+        _dest_topic: &str,
+    ) -> Result<u64, String> {
+        Err("Message replay not supported by this backend".into())
     }
 
     /// Reset consumer group offsets for a queue/topic

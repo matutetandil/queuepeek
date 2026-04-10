@@ -131,16 +131,31 @@ fn draw_content(frame: &mut Frame, app: &App, area: Rect) {
     let headers_paragraph = Paragraph::new(header_lines).block(headers_block);
     frame.render_widget(headers_paragraph, content_chunks[0]);
 
+    // Optionally decode binary payload
+    let working_body = if app.detail_decoded {
+        decode_payload(&msg.body)
+    } else {
+        (msg.body.clone(), "")
+    };
+    let (decoded_body, decode_label) = working_body;
+
     // Payload block — auto-detect format and pretty-print with syntax highlighting
     let (payload_text, format_label) = if app.detail_pretty {
-        let (formatted, label) = pretty_format(&msg.body);
-        match label {
-            "json" => (highlight_json(&formatted, app.theme), label),
-            "xml" => (highlight_xml(&formatted, app.theme), label),
-            _ => (Text::styled(formatted, Style::default().fg(app.theme.primary)), label),
-        }
+        let (formatted, label) = pretty_format(&decoded_body);
+        let full_label = if decode_label.is_empty() {
+            label.to_string()
+        } else {
+            format!("{}+{}", label, decode_label)
+        };
+        let text = match label {
+            "json" => highlight_json(&formatted, app.theme),
+            "xml" => highlight_xml(&formatted, app.theme),
+            _ => Text::styled(formatted, Style::default().fg(app.theme.primary)),
+        };
+        (text, full_label)
     } else {
-        (Text::styled(msg.body.clone(), Style::default().fg(app.theme.primary)), "raw")
+        let label = if decode_label.is_empty() { "raw".to_string() } else { format!("raw+{}", decode_label) };
+        (Text::styled(decoded_body, Style::default().fg(app.theme.primary)), label)
     };
 
     let pretty_indicator = format!("[{}]", format_label);
@@ -406,12 +421,58 @@ fn highlight_xml(text: &str, theme: &Theme) -> Text<'static> {
     Text::from(lines)
 }
 
+/// Attempt to decode a base64-encoded and/or gzip-compressed payload.
+/// Returns (decoded_string, decode_label).
+fn decode_payload(body: &str) -> (String, &'static str) {
+    use base64::Engine;
+    use std::io::Read;
+
+    let trimmed = body.trim();
+
+    // Try base64 decode first
+    if let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(trimmed) {
+        // Check if decoded bytes are gzip
+        if bytes.len() >= 2 && bytes[0] == 0x1f && bytes[1] == 0x8b {
+            let mut decoder = flate2::read::GzDecoder::new(&bytes[..]);
+            let mut decompressed = String::new();
+            if decoder.read_to_string(&mut decompressed).is_ok() {
+                return (decompressed, "b64+gz");
+            }
+        }
+        // Not gzip, try as UTF-8
+        if let Ok(text) = String::from_utf8(bytes) {
+            return (text, "b64");
+        }
+    }
+
+    // Also try URL-safe base64
+    if let Ok(bytes) = base64::engine::general_purpose::URL_SAFE.decode(trimmed) {
+        if let Ok(text) = String::from_utf8(bytes) {
+            return (text, "b64url");
+        }
+    }
+
+    // Try raw gzip (body as bytes)
+    let raw_bytes = trimmed.as_bytes();
+    if raw_bytes.len() >= 2 && raw_bytes[0] == 0x1f && raw_bytes[1] == 0x8b {
+        let mut decoder = flate2::read::GzDecoder::new(raw_bytes);
+        let mut decompressed = String::new();
+        if decoder.read_to_string(&mut decompressed).is_ok() {
+            return (decompressed, "gzip");
+        }
+    }
+
+    // No decode possible
+    (body.to_string(), "")
+}
+
 fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
     let ks = Style::default().fg(app.theme.accent).bg(app.theme.sidebar_bg);
     let ds = Style::default().fg(app.theme.muted).bg(app.theme.sidebar_bg);
     let mut spans = vec![
         Span::styled("  j/k", ks), Span::styled(":scroll ", ds),
         Span::styled("p", ks), Span::styled(":pretty ", ds),
+        Span::styled("b", ks), Span::styled(":decode ", ds),
         Span::styled("c", ks), Span::styled(":copy payload ", ds),
         Span::styled("h", ks), Span::styled(":copy headers ", ds),
         Span::styled("E", ks), Span::styled(":edit ", ds),

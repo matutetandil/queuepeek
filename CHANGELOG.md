@@ -1,5 +1,53 @@
 # Changelog
 
+## [0.6.0] - 2026-04-09
+
+### Added
+- Sparklines in queue list — inline unicode block-character sparklines showing the publish rate history
+  (last 60 data points, covering approximately 5 minutes) displayed next to each queue row
+  - History accumulates automatically from the queue auto-refresh timer
+  - Provides at-a-glance trend visibility without opening the queue info popup
+- Base64 and gzip auto-decode in message detail (`b` key)
+  - Toggle to auto-detect and decode base64, URL-safe base64, gzip, or base64+gzip payloads
+  - Detected decode method is shown in the format label (e.g. `[json+b64]`, `[text+gz]`)
+  - Combines with pretty-print and syntax highlighting when the decoded content is valid JSON or XML
+- Message diff side-by-side (`d` key with exactly 2 messages selected in message list)
+  - Opens a full-screen diff view using the `similar` crate
+  - Shows header field differences and colored line-by-line body diff
+  - Red lines indicate content removed from the first message; green lines indicate additions in the second
+  - Scroll the diff with `j`/`k`; close with `Esc`
+- Advanced message filtering (Tab in filter input to toggle between simple and advanced mode)
+  - Field-based filter expressions:
+    - `routing_key = "value"` — exact match on routing key
+    - `header.key contains "text"` — substring match on a specific header
+    - `body.field = "value"` — JSON path match on the message body
+    - `field != "value"` — negation variant for any supported field
+  - Simple mode retains the existing substring filter behavior
+- Saved filters / bookmarks per queue (`B` to open load popup, `Ctrl+B` to save current filter)
+  - Named filters are saved to `config.toml` under the current queue
+  - Load popup shows the list of saved filters with `j`/`k` navigation; press `d` to delete, `Enter` to apply
+- Payload templates with variable interpolation in the publish popup (`Ctrl+T` to load, `Ctrl+W` to save)
+  - Templates are saved to `config.toml` with a user-provided name
+  - Supported template variables: `{{timestamp}}`, `{{uuid}}`, `{{random_int}}`, `{{counter}}`, `{{env.VAR}}`
+  - Variables are substituted at publish time
+- Message replay for Kafka (`Y` key in message list)
+  - Opens a config popup to specify start offset, end offset, and destination topic
+  - Replays messages from the selected offset range to the destination topic
+  - Kafka only; shows "not supported" message on other backends
+- Exchange and binding topology view (`X` key on queue list)
+  - Tree view showing exchanges -> bindings -> destination queues
+  - RabbitMQ: fetches data from the Management API
+  - Kafka and MQTT: shows "not supported" message
+  - Scroll with `j`/`k`, close with `Esc`
+- Benchmark / load testing (`F5` key on queue list)
+  - Configuration popup for total message count and concurrency level
+  - Uses the current publish form body as the message template
+  - Live progress gauge during the flood publish
+  - Results summary shows messages/sec throughput, average latency, and error count
+  - Cancel at any time with `Esc`
+
+---
+
 ## [0.5.0] - 2026-04-09
 
 ### Added

@@ -76,8 +76,9 @@ fn draw_header(frame: &mut Frame, app: &App, area: Rect) {
 fn draw_list(frame: &mut Frame, app: &mut App, area: Rect) {
     let border_color = app.theme.accent;
 
+    let filter_mode = if app.message_filter_advanced { "adv" } else { "filter" };
     let title = if app.message_filter_active || !app.message_filter.is_empty() {
-        format!(" Messages (filter: {}) ", app.message_filter)
+        format!(" Messages ({}: {}) ", filter_mode, app.message_filter)
     } else {
         " Messages ".to_string()
     };
@@ -224,6 +225,8 @@ fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
         Span::styled(":all ", ds),
         Span::styled("C", ks),
         Span::styled(":copy ", ds),
+        Span::styled("d", ks),
+        Span::styled(":diff ", ds),
         Span::styled("D", ks),
         Span::styled(":del ", ds),
         Span::styled("e", ks),

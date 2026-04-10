@@ -3,7 +3,7 @@ use serde::Deserialize;
 use std::sync::Arc;
 use std::time::Duration;
 
-use super::{Backend, BrokerInfo, DetailEntry, DetailSection, MessageInfo, QueueInfo};
+use super::{Backend, BindingInfo, BrokerInfo, DetailEntry, DetailSection, ExchangeInfo, MessageInfo, QueueInfo};
 use crate::config::Profile;
 
 // API response structs (same as current rabbit.rs)
@@ -518,6 +518,44 @@ impl Backend for RabbitMqBackend {
         }
 
         Ok(sections)
+    }
+
+    fn list_exchanges(&self, namespace: &str) -> Result<Vec<ExchangeInfo>, String> {
+        let vhost = urlencoding::encode(namespace);
+        let url = format!("{}/api/exchanges/{}", self.base_url, vhost);
+        let resp: Vec<serde_json::Value> = self.client.get(&url)
+            .basic_auth(&self.username, Some(&self.password))
+            .timeout(Duration::from_secs(10))
+            .send().map_err(|e| format!("HTTP: {}", e))?
+            .json().map_err(|e| format!("JSON: {}", e))?;
+
+        Ok(resp.iter().map(|e| {
+            ExchangeInfo {
+                name: e["name"].as_str().unwrap_or("").to_string(),
+                exchange_type: e["type"].as_str().unwrap_or("").to_string(),
+                durable: e["durable"].as_bool().unwrap_or(false),
+            }
+        }).collect())
+    }
+
+    fn list_bindings(&self, namespace: &str) -> Result<Vec<BindingInfo>, String> {
+        let vhost = urlencoding::encode(namespace);
+        let url = format!("{}/api/bindings/{}", self.base_url, vhost);
+        let resp: Vec<serde_json::Value> = self.client.get(&url)
+            .basic_auth(&self.username, Some(&self.password))
+            .timeout(Duration::from_secs(10))
+            .send().map_err(|e| format!("HTTP: {}", e))?
+            .json().map_err(|e| format!("JSON: {}", e))?;
+
+        Ok(resp.iter().map(|b| {
+            BindingInfo {
+                source: b["source"].as_str().unwrap_or("").to_string(),
+                destination: b["destination"].as_str().unwrap_or("").to_string(),
+                routing_key: b["routing_key"].as_str().unwrap_or("").to_string(),
+                destination_type: b["destination_type"].as_str().unwrap_or("queue").to_string(),
+            }
+        }).filter(|b| !b.source.is_empty()) // skip default exchange bindings
+        .collect())
     }
 
     fn clone_backend(&self) -> Box<dyn Backend> {

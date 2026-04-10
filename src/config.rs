@@ -43,6 +43,24 @@ impl Profile {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SavedFilter {
+    pub name: String,
+    pub expression: String,
+    #[serde(default)]
+    pub advanced: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MessageTemplate {
+    pub name: String,
+    #[serde(default)]
+    pub routing_key: String,
+    #[serde(default)]
+    pub content_type: String,
+    pub body: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Config {
     #[serde(default)]
@@ -51,6 +69,10 @@ pub struct Config {
     pub theme: Option<String>,
     #[serde(default)]
     pub profiles: HashMap<String, Profile>,
+    #[serde(default)]
+    pub filters: HashMap<String, Vec<SavedFilter>>,
+    #[serde(default)]
+    pub templates: Vec<MessageTemplate>,
 }
 
 impl Config {

@@ -35,6 +35,15 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         Popup::ScheduledMessages => draw_scheduled_messages(frame, app),
         Popup::CompareQueuePicker => draw_compare_queue_picker(frame, app),
         Popup::CompareResults => draw_compare_results(frame, app),
+        Popup::MessageDiff => draw_message_diff(frame, app),
+        Popup::SavedFilters => draw_saved_filters(frame, app),
+        Popup::SaveFilter => draw_save_filter(frame, app),
+        Popup::TemplatePicker => draw_template_picker(frame, app),
+        Popup::SaveTemplate => draw_save_template(frame, app),
+        Popup::ReplayConfig => draw_replay_config(frame, app),
+        Popup::TopologyView => draw_topology(frame, app),
+        Popup::BenchmarkConfig => draw_benchmark_config(frame, app),
+        Popup::BenchmarkRunning => draw_benchmark_running(frame, app),
         Popup::ConfirmReroute { ref exchange, ref routing_key, count } => {
             let msg = format!(
                 "Re-route {} message(s) to:\n\n  Exchange:    {}\n  Routing Key: {}\n\nThis will publish to the original exchange.\nThe messages remain in the current queue.",
@@ -89,6 +98,15 @@ fn draw_help(frame: &mut Frame, app: &App) {
         ("G", "Consumer groups (Kafka)"),
         ("R", "Reset group offsets (Kafka)"),
         ("=", "Compare two queues"),
+        ("d", "Diff two selected messages"),
+        ("b", "Toggle base64/gzip decode"),
+        ("B", "Load saved filter"),
+        ("Ctrl+B", "Save current filter"),
+        ("Ctrl+T", "Load message template"),
+        ("Ctrl+W", "Save as template"),
+        ("X", "Topology view (exchanges)"),
+        ("Y", "Replay messages (Kafka)"),
+        ("F5", "Benchmark / load test"),
         ("C", "Copy messages to queue"),
         ("m", "Move messages to queue"),
         ("spc", "Select message (list)"),
@@ -377,6 +395,8 @@ fn draw_publish(frame: &mut Frame, app: &mut App, title: &str) {
             Span::styled(hint, Style::default().fg(app.theme.accent)),
             Span::styled("  ", ds),
             Span::styled("ctrl+s", ks), Span::styled(":schedule ", ds),
+            Span::styled("ctrl+t", ks), Span::styled(":template ", ds),
+            Span::styled("ctrl+w", ks), Span::styled(":save tpl ", ds),
             Span::styled("esc", ks), Span::styled(":cancel", ds),
         ])).style(Style::default().bg(app.theme.bg)),
         Rect::new(inner.x, footer_y, inner.width, 1),
@@ -1157,4 +1177,385 @@ fn draw_compare_results(frame: &mut Frame, app: &App) {
         .style(Style::default().bg(app.theme.bg))
         .scroll((app.comparison_scroll, 0));
     frame.render_widget(content, inner);
+}
+
+fn draw_message_diff(frame: &mut Frame, app: &App) {
+    use similar::{ChangeTag, TextDiff};
+
+    let popup_area = centered_rect(90, 85, frame.area());
+    frame.render_widget(Clear, popup_area);
+
+    let (msg_a, msg_b) = match &app.diff_messages {
+        Some((a, b)) => (a, b),
+        None => return,
+    };
+
+    let block = Block::bordered()
+        .title(format!(" Diff: #{} vs #{} ", msg_a.index, msg_b.index))
+        .title_style(Style::default().fg(app.theme.accent).bold())
+        .border_style(Style::default().fg(app.theme.accent))
+        .style(Style::default().bg(app.theme.bg));
+
+    let inner = block.inner(popup_area);
+    frame.render_widget(block, popup_area);
+
+    let ks = Style::default().fg(app.theme.accent).bold();
+    let ds = Style::default().fg(app.theme.muted);
+
+    let mut lines: Vec<Line> = Vec::new();
+
+    // Header comparison
+    let header_keys = ["routing_key", "exchange", "content_type"];
+    for key in &header_keys {
+        let val_a = match *key {
+            "routing_key" => &msg_a.routing_key,
+            "exchange" => &msg_a.exchange,
+            "content_type" => &msg_a.content_type,
+            _ => "",
+        };
+        let val_b = match *key {
+            "routing_key" => &msg_b.routing_key,
+            "exchange" => &msg_b.exchange,
+            "content_type" => &msg_b.content_type,
+            _ => "",
+        };
+        if val_a != val_b {
+            lines.push(Line::from(vec![
+                Span::styled(format!("  {}: ", key), ds),
+                Span::styled(val_a, Style::default().fg(app.theme.error)),
+                Span::styled(" → ", ds),
+                Span::styled(val_b, Style::default().fg(app.theme.success)),
+            ]));
+        }
+    }
+
+    if !lines.is_empty() {
+        lines.push(Line::from(""));
+    }
+
+    // Body diff using similar crate
+    let body_a = pretty_format_for_diff(&msg_a.body);
+    let body_b = pretty_format_for_diff(&msg_b.body);
+
+    let diff = TextDiff::from_lines(&body_a, &body_b);
+
+    // Use half-width columns side by side
+    let half_width = (inner.width as usize).saturating_sub(4) / 2;
+
+    lines.push(Line::from(vec![
+        Span::styled(format!("  {:<width$}", format!("Message #{}", msg_a.index), width = half_width), ks),
+        Span::styled("│ ", ds),
+        Span::styled(format!("Message #{}", msg_b.index), ks),
+    ]));
+    lines.push(Line::from(vec![
+        Span::styled(format!("  {}", "─".repeat(half_width)), ds),
+        Span::styled("┼", ds),
+        Span::styled("─".repeat(half_width), ds),
+    ]));
+
+    for change in diff.iter_all_changes() {
+        let line_text: String = change.value().trim_end().chars().take(half_width).collect();
+        match change.tag() {
+            ChangeTag::Equal => {
+                lines.push(Line::from(vec![
+                    Span::styled(format!("  {:<width$}", line_text, width = half_width), Style::default().fg(app.theme.primary)),
+                    Span::styled("│ ", ds),
+                    Span::styled(format!("{:<width$}", line_text, width = half_width), Style::default().fg(app.theme.primary)),
+                ]));
+            }
+            ChangeTag::Delete => {
+                lines.push(Line::from(vec![
+                    Span::styled(format!("- {:<width$}", line_text, width = half_width - 2), Style::default().fg(app.theme.error)),
+                    Span::styled("│", ds),
+                    Span::styled(" ", Style::default()),
+                ]));
+            }
+            ChangeTag::Insert => {
+                lines.push(Line::from(vec![
+                    Span::styled(format!("  {:<width$}", "", width = half_width), Style::default()),
+                    Span::styled("│ ", ds),
+                    Span::styled(format!("+ {}", line_text), Style::default().fg(app.theme.success)),
+                ]));
+            }
+        }
+    }
+
+    // Footer
+    lines.push(Line::from(""));
+    lines.push(Line::from(vec![
+        Span::styled("  j/k", ks),
+        Span::styled(":scroll  ", ds),
+        Span::styled("esc", ks),
+        Span::styled(":close", ds),
+    ]));
+
+    let content = Paragraph::new(lines)
+        .style(Style::default().bg(app.theme.bg))
+        .scroll((app.diff_scroll, 0));
+    frame.render_widget(content, inner);
+}
+
+/// Pretty-format body for diffing (attempt JSON/XML formatting)
+fn pretty_format_for_diff(body: &str) -> String {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(body) {
+        serde_json::to_string_pretty(&val).unwrap_or_else(|_| body.to_string())
+    } else {
+        body.to_string()
+    }
+}
+
+fn draw_saved_filters(frame: &mut Frame, app: &mut App) {
+    let popup_area = centered_rect(50, 50, frame.area());
+    frame.render_widget(Clear, popup_area);
+
+    let queue = &app.current_queue_name;
+    let block = Block::bordered()
+        .title(format!(" Saved Filters: {} ", queue))
+        .title_style(Style::default().fg(app.theme.accent).bold())
+        .border_style(Style::default().fg(app.theme.accent))
+        .style(Style::default().bg(app.theme.bg));
+
+    let filters = app.config.filters.get(queue).cloned().unwrap_or_default();
+    let items: Vec<ListItem> = filters.iter().map(|f| {
+        let mode = if f.advanced { "adv" } else { "simple" };
+        ListItem::new(Line::from(vec![
+            Span::styled(format!("  {} ", f.name), Style::default().fg(app.theme.primary).bold()),
+            Span::styled(format!("[{}] ", mode), Style::default().fg(app.theme.muted)),
+            Span::styled(&f.expression, Style::default().fg(app.theme.accent)),
+        ]))
+    }).collect();
+
+    let list = List::new(items)
+        .block(block)
+        .highlight_style(Style::default().bg(app.theme.selected_bg).fg(app.theme.white).add_modifier(Modifier::BOLD))
+        .highlight_symbol("▸ ")
+        .style(Style::default().bg(app.theme.bg));
+
+    frame.render_stateful_widget(list, popup_area, &mut app.saved_filter_list_state);
+}
+
+fn draw_save_filter(frame: &mut Frame, app: &App) {
+    let popup_area = centered_rect(45, 20, frame.area());
+    frame.render_widget(Clear, popup_area);
+
+    let block = Block::bordered()
+        .title(" Save Filter ")
+        .title_style(Style::default().fg(app.theme.accent).bold())
+        .border_style(Style::default().fg(app.theme.accent))
+        .style(Style::default().bg(app.theme.bg));
+
+    let inner = block.inner(popup_area);
+    frame.render_widget(block, popup_area);
+
+    let lines = vec![
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("  Name: ", Style::default().fg(app.theme.muted)),
+            Span::styled(&app.save_filter_name, Style::default().fg(app.theme.primary).bold()),
+            Span::styled("█", Style::default().fg(app.theme.accent)),
+        ]),
+        Line::from(vec![
+            Span::styled("  Expr: ", Style::default().fg(app.theme.muted)),
+            Span::styled(&app.message_filter, Style::default().fg(app.theme.accent)),
+        ]),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("  enter", Style::default().fg(app.theme.accent).bold()),
+            Span::styled(":save  ", Style::default().fg(app.theme.muted)),
+            Span::styled("esc", Style::default().fg(app.theme.accent).bold()),
+            Span::styled(":cancel", Style::default().fg(app.theme.muted)),
+        ]),
+    ];
+
+    frame.render_widget(
+        Paragraph::new(lines).style(Style::default().bg(app.theme.bg)),
+        inner,
+    );
+}
+
+fn draw_template_picker(frame: &mut Frame, app: &mut App) {
+    let popup_area = centered_rect(50, 50, frame.area());
+    frame.render_widget(Clear, popup_area);
+
+    let block = Block::bordered()
+        .title(" Message Templates ")
+        .title_style(Style::default().fg(app.theme.accent).bold())
+        .border_style(Style::default().fg(app.theme.accent))
+        .style(Style::default().bg(app.theme.bg));
+
+    let items: Vec<ListItem> = app.config.templates.iter().map(|t| {
+        let body_preview: String = t.body.chars().take(40).collect();
+        let body_preview = body_preview.replace('\n', " ");
+        ListItem::new(Line::from(vec![
+            Span::styled(format!("  {} ", t.name), Style::default().fg(app.theme.primary).bold()),
+            Span::styled(body_preview, Style::default().fg(app.theme.muted)),
+        ]))
+    }).collect();
+
+    let list = List::new(items)
+        .block(block)
+        .highlight_style(Style::default().bg(app.theme.selected_bg).fg(app.theme.white).add_modifier(Modifier::BOLD))
+        .highlight_symbol("▸ ")
+        .style(Style::default().bg(app.theme.bg));
+
+    frame.render_stateful_widget(list, popup_area, &mut app.template_list_state);
+}
+
+fn draw_save_template(frame: &mut Frame, app: &App) {
+    let popup_area = centered_rect(45, 20, frame.area());
+    frame.render_widget(Clear, popup_area);
+
+    let block = Block::bordered()
+        .title(" Save Template ")
+        .title_style(Style::default().fg(app.theme.accent).bold())
+        .border_style(Style::default().fg(app.theme.accent))
+        .style(Style::default().bg(app.theme.bg));
+
+    let inner = block.inner(popup_area);
+    frame.render_widget(block, popup_area);
+
+    let lines = vec![
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("  Name: ", Style::default().fg(app.theme.muted)),
+            Span::styled(&app.save_template_name, Style::default().fg(app.theme.primary).bold()),
+            Span::styled("█", Style::default().fg(app.theme.accent)),
+        ]),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("  enter", Style::default().fg(app.theme.accent).bold()),
+            Span::styled(":save  ", Style::default().fg(app.theme.muted)),
+            Span::styled("esc", Style::default().fg(app.theme.accent).bold()),
+            Span::styled(":cancel", Style::default().fg(app.theme.muted)),
+        ]),
+    ];
+
+    frame.render_widget(
+        Paragraph::new(lines).style(Style::default().bg(app.theme.bg)),
+        inner,
+    );
+}
+
+fn draw_replay_config(frame: &mut Frame, app: &App) {
+    let popup_area = centered_rect(50, 35, frame.area());
+    frame.render_widget(Clear, popup_area);
+    let block = Block::bordered()
+        .title(" Replay Messages (Kafka) ")
+        .title_style(Style::default().fg(app.theme.accent).bold())
+        .border_style(Style::default().fg(app.theme.accent))
+        .style(Style::default().bg(app.theme.bg));
+    let inner = block.inner(popup_area);
+    frame.render_widget(block, popup_area);
+
+    let ks = Style::default().fg(app.theme.accent).bold();
+    let ds = Style::default().fg(app.theme.muted);
+    let fields = [("Start Offset", &app.replay_start), ("End Offset", &app.replay_end), ("Dest Topic", &app.replay_dest)];
+    let mut lines: Vec<Line> = vec![Line::from("")];
+    for (i, (label, value)) in fields.iter().enumerate() {
+        let focused = i == app.replay_focused_field;
+        let ls = if focused { ks } else { ds };
+        let vs = if focused { Style::default().fg(app.theme.white) } else { Style::default().fg(app.theme.primary) };
+        let c = if focused { "█" } else { "" };
+        lines.push(Line::from(vec![Span::styled(format!("  {}: ", label), ls), Span::styled(format!("{}{}", value, c), vs)]));
+    }
+    lines.push(Line::from(""));
+    lines.push(Line::from(vec![Span::styled("  tab", ks), Span::styled(":next  ", ds), Span::styled("enter", ks), Span::styled(":replay  ", ds), Span::styled("esc", ks), Span::styled(":cancel", ds)]));
+    frame.render_widget(Paragraph::new(lines).style(Style::default().bg(app.theme.bg)), inner);
+}
+
+fn draw_topology(frame: &mut Frame, app: &App) {
+    let popup_area = centered_rect(70, 75, frame.area());
+    frame.render_widget(Clear, popup_area);
+    let block = Block::bordered()
+        .title(" Topology ")
+        .title_style(Style::default().fg(app.theme.accent).bold())
+        .border_style(Style::default().fg(app.theme.accent))
+        .style(Style::default().bg(app.theme.bg));
+    let inner = block.inner(popup_area);
+    frame.render_widget(block, popup_area);
+
+    if app.topology_exchanges.is_empty() && app.loading {
+        frame.render_widget(Paragraph::new("  Loading...").style(Style::default().fg(app.theme.muted).bg(app.theme.bg)), inner);
+        return;
+    }
+    let ds = Style::default().fg(app.theme.muted);
+    let ks = Style::default().fg(app.theme.accent).bold();
+    let mut lines: Vec<Line> = Vec::new();
+    for exchange in &app.topology_exchanges {
+        if exchange.name.is_empty() { continue; }
+        lines.push(Line::from(vec![
+            Span::styled(format!("  {} ", exchange.name), ks),
+            Span::styled(format!("[{}]", exchange.exchange_type), ds),
+            if exchange.durable { Span::styled(" durable", Style::default().fg(app.theme.success)) } else { Span::styled(" transient", ds) },
+        ]));
+        let bindings: Vec<&crate::backend::BindingInfo> = app.topology_bindings.iter().filter(|b| b.source == exchange.name).collect();
+        for (i, b) in bindings.iter().enumerate() {
+            let pfx = if i == bindings.len() - 1 { "  └── " } else { "  ├── " };
+            let rk = if b.routing_key.is_empty() { "*".to_string() } else { b.routing_key.clone() };
+            lines.push(Line::from(vec![Span::styled(pfx, ds), Span::styled(rk, Style::default().fg(app.theme.primary)), Span::styled(format!(" → {}", b.destination), Style::default().fg(app.theme.white))]));
+        }
+        if bindings.is_empty() { lines.push(Line::from(Span::styled("  └── (no bindings)", ds))); }
+        lines.push(Line::from(""));
+    }
+    if lines.is_empty() { lines.push(Line::from(Span::styled("  No exchanges found", ds))); }
+    lines.push(Line::from(vec![Span::styled("  j/k", ks), Span::styled(":scroll  ", ds), Span::styled("esc", ks), Span::styled(":close", ds)]));
+    frame.render_widget(Paragraph::new(lines).style(Style::default().bg(app.theme.bg)).scroll((app.topology_scroll, 0)), inner);
+}
+
+fn draw_benchmark_config(frame: &mut Frame, app: &App) {
+    let popup_area = centered_rect(45, 30, frame.area());
+    frame.render_widget(Clear, popup_area);
+    let block = Block::bordered()
+        .title(" Benchmark Config ")
+        .title_style(Style::default().fg(app.theme.accent).bold())
+        .border_style(Style::default().fg(app.theme.accent))
+        .style(Style::default().bg(app.theme.bg));
+    let inner = block.inner(popup_area);
+    frame.render_widget(block, popup_area);
+    let ks = Style::default().fg(app.theme.accent).bold();
+    let ds = Style::default().fg(app.theme.muted);
+    let fields = [("Message Count", &app.bench_count), ("Concurrency", &app.bench_concurrency)];
+    let mut lines: Vec<Line> = vec![Line::from("")];
+    for (i, (label, value)) in fields.iter().enumerate() {
+        let focused = i == app.bench_focused_field;
+        let ls = if focused { ks } else { ds };
+        let vs = if focused { Style::default().fg(app.theme.white) } else { Style::default().fg(app.theme.primary) };
+        let c = if focused { "█" } else { "" };
+        lines.push(Line::from(vec![Span::styled(format!("  {}: ", label), ls), Span::styled(format!("{}{}", value, c), vs)]));
+    }
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled("  Uses publish form body as template", ds)));
+    lines.push(Line::from(""));
+    lines.push(Line::from(vec![Span::styled("  tab", ks), Span::styled(":next  ", ds), Span::styled("enter", ks), Span::styled(":start  ", ds), Span::styled("esc", ks), Span::styled(":cancel", ds)]));
+    frame.render_widget(Paragraph::new(lines).style(Style::default().bg(app.theme.bg)), inner);
+}
+
+fn draw_benchmark_running(frame: &mut Frame, app: &App) {
+    let popup_area = centered_rect(50, 20, frame.area());
+    frame.render_widget(Clear, popup_area);
+    let block = Block::bordered()
+        .title(" Benchmark Running ")
+        .title_style(Style::default().fg(app.theme.accent).bold())
+        .border_style(Style::default().fg(app.theme.accent))
+        .style(Style::default().bg(app.theme.bg));
+    let inner = block.inner(popup_area);
+    frame.render_widget(block, popup_area);
+
+    let (completed, total) = app.bench_progress;
+    let pct = if total > 0 { (completed as f64 / total as f64 * 100.0) as u16 } else { 0 };
+    let gauge = Gauge::default()
+        .gauge_style(Style::default().fg(app.theme.accent).bg(app.theme.highlight_bg))
+        .percent(pct)
+        .label(format!("{}/{} ({:.0}%)", completed, total, pct as f64));
+    let gauge_area = Rect::new(inner.x + 2, inner.y + 1, inner.width.saturating_sub(4), 1);
+    frame.render_widget(gauge, gauge_area);
+
+    let status_line = if let Some(ref stats) = app.bench_stats {
+        let mps = if stats.elapsed_ms > 0 { stats.total as f64 / (stats.elapsed_ms as f64 / 1000.0) } else { 0.0 };
+        format!("  Done: {:.0} msg/s, avg {}ms, {} errors", mps, stats.avg_latency_ms, stats.errors)
+    } else {
+        "  Publishing... (esc to cancel)".to_string()
+    };
+    let status_area = Rect::new(inner.x, inner.y + 3, inner.width, 1);
+    frame.render_widget(Paragraph::new(Span::styled(status_line, Style::default().fg(app.theme.primary))).style(Style::default().bg(app.theme.bg)), status_area);
 }

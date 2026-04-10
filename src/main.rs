@@ -458,6 +458,22 @@ fn handle_queue_list_key(app: &mut App, code: KeyCode, modifiers: KeyModifiers) 
                 app.set_status("No scheduled messages", false);
             }
         }
+        KeyCode::Char('X') => {
+            // Topology view
+            app.topology_exchanges.clear();
+            app.topology_bindings.clear();
+            app.topology_scroll = 0;
+            app.popup = Popup::TopologyView;
+            app.loading = true;
+            app.load_topology();
+        }
+        KeyCode::F(5) => {
+            // Benchmark mode
+            if app.selected_queue().is_some() {
+                app.bench_focused_field = 0;
+                app.popup = Popup::BenchmarkConfig;
+            }
+        }
         _ => {}
     }
 }
@@ -622,6 +638,19 @@ fn handle_message_list_key(app: &mut App, code: KeyCode, modifiers: KeyModifiers
                 app.popup_list_state.select(Some(0));
             }
         }
+        KeyCode::Char('d') => {
+            // Diff two selected messages
+            if app.selected_messages.len() == 2 {
+                let indices: Vec<usize> = app.selected_messages.iter().cloned().collect();
+                if let (Some(a), Some(b)) = (app.messages.get(indices[0]), app.messages.get(indices[1])) {
+                    app.diff_messages = Some((a.clone(), b.clone()));
+                    app.diff_scroll = 0;
+                    app.popup = Popup::MessageDiff;
+                }
+            } else if !app.selected_messages.is_empty() {
+                app.set_status("Select exactly 2 messages to diff", true);
+            }
+        }
         KeyCode::Char('D') => {
             // Delete selected messages
             if app.selection_count() > 0 {
@@ -678,6 +707,44 @@ fn handle_message_list_key(app: &mut App, code: KeyCode, modifiers: KeyModifiers
                 app.set_status("No scheduled messages", false);
             }
         }
+        KeyCode::Char('Y') => {
+            // Replay messages (Kafka only)
+            if let Some(ref backend) = app.backend {
+                if backend.backend_type() == "kafka" {
+                    app.replay_start.clear();
+                    app.replay_end.clear();
+                    app.replay_dest.clear();
+                    app.replay_focused_field = 0;
+                    app.popup = Popup::ReplayConfig;
+                } else {
+                    app.set_status("Replay is only supported for Kafka", true);
+                }
+            }
+        }
+        KeyCode::Char('B') => {
+            // Load saved filter
+            let queue = app.current_queue_name.clone();
+            let filters = app.config.filters.get(&queue);
+            if let Some(f) = filters {
+                if !f.is_empty() {
+                    app.saved_filter_list_state.select(Some(0));
+                    app.popup = Popup::SavedFilters;
+                } else {
+                    app.set_status("No saved filters for this queue", false);
+                }
+            } else {
+                app.set_status("No saved filters for this queue", false);
+            }
+        }
+        KeyCode::Char('b') if modifiers.contains(KeyModifiers::CONTROL) => {
+            // Save current filter
+            if !app.message_filter.is_empty() {
+                app.save_filter_name.clear();
+                app.popup = Popup::SaveFilter;
+            } else {
+                app.set_status("No filter to save", true);
+            }
+        }
         KeyCode::Char('L') => {
             // DLQ re-route: parse x-death and offer to re-route
             if let Some((exchange, routing_key)) = app.parse_dlq_info() {
@@ -705,6 +772,13 @@ fn handle_message_list_key(app: &mut App, code: KeyCode, modifiers: KeyModifiers
 
 fn handle_message_filter_key(app: &mut App, code: KeyCode) {
     match code {
+        KeyCode::Tab => {
+            app.message_filter_advanced = !app.message_filter_advanced;
+            app.update_filtered_messages();
+            if !app.filtered_message_indices.is_empty() {
+                app.message_list_state.select(Some(0));
+            }
+        }
         KeyCode::Char(c) => {
             app.message_filter.push(c);
             app.update_filtered_messages();
@@ -791,6 +865,14 @@ fn handle_message_detail_key(app: &mut App, code: KeyCode, modifiers: KeyModifie
         KeyCode::Char('p') => {
             app.detail_pretty = !app.detail_pretty;
         }
+        KeyCode::Char('b') => {
+            app.detail_decoded = !app.detail_decoded;
+            if app.detail_decoded {
+                app.set_status("Binary decode ON (base64/gzip)", false);
+            } else {
+                app.set_status("Binary decode OFF", false);
+            }
+        }
         KeyCode::Char('c') => {
             if let Some(msg) = app.messages.get(app.detail_message_idx) {
                 let text = msg.body.clone();
@@ -851,6 +933,45 @@ fn handle_message_detail_key(app: &mut App, code: KeyCode, modifiers: KeyModifie
 // ---------------------------------------------------------------------------
 // Clipboard helper
 // ---------------------------------------------------------------------------
+
+fn interpolate_template(body: &str, counter: &mut u64) -> String {
+    let mut result = body.to_string();
+
+    if result.contains("{{counter}}") {
+        *counter += 1;
+        result = result.replace("{{counter}}", &counter.to_string());
+    }
+    if result.contains("{{timestamp}}") {
+        let ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        result = result.replace("{{timestamp}}", &ts.to_string());
+    }
+    if result.contains("{{uuid}}") {
+        result = result.replace("{{uuid}}", &uuid::Uuid::new_v4().to_string());
+    }
+    if result.contains("{{random_int}}") {
+        let r = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .subsec_nanos();
+        result = result.replace("{{random_int}}", &(r % 1_000_000).to_string());
+    }
+
+    // Handle {{env.VAR}} patterns
+    while let Some(start) = result.find("{{env.") {
+        if let Some(end) = result[start..].find("}}") {
+            let var_name = &result[start + 6..start + end];
+            let val = std::env::var(var_name).unwrap_or_default();
+            result = format!("{}{}{}", &result[..start], val, &result[start + end + 2..]);
+        } else {
+            break;
+        }
+    }
+
+    result
+}
 
 fn copy_to_clipboard(text: &str) -> Result<(), String> {
     arboard::Clipboard::new()
@@ -1032,6 +1153,22 @@ fn handle_popup_key(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
                         app.publish_form.error.clear();
                         app.popup = Popup::ScheduleDelay;
                         app.popup_list_state.select(Some(0));
+                    }
+                }
+                KeyCode::Char('t') if modifiers.contains(KeyModifiers::CONTROL) => {
+                    // Load template
+                    if !app.config.templates.is_empty() {
+                        app.template_list_state.select(Some(0));
+                        app.popup = Popup::TemplatePicker;
+                    } else {
+                        app.publish_form.error = "No templates saved yet".into();
+                    }
+                }
+                KeyCode::Char('w') if modifiers.contains(KeyModifiers::CONTROL) => {
+                    // Save as template
+                    if !app.publish_form.body.is_empty() {
+                        app.save_template_name.clear();
+                        app.popup = Popup::SaveTemplate;
                     }
                 }
                 KeyCode::Char(c) => {
@@ -1460,6 +1597,27 @@ fn handle_popup_key(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
                 app.operation_cancel.store(true, std::sync::atomic::Ordering::Relaxed);
             }
         }
+        Popup::MessageDiff => {
+            match code {
+                KeyCode::Esc => {
+                    app.popup = Popup::None;
+                    app.diff_messages = None;
+                }
+                KeyCode::Char('j') | KeyCode::Down => {
+                    app.diff_scroll = app.diff_scroll.saturating_add(1);
+                }
+                KeyCode::Char('k') | KeyCode::Up => {
+                    app.diff_scroll = app.diff_scroll.saturating_sub(1);
+                }
+                KeyCode::PageDown => {
+                    app.diff_scroll = app.diff_scroll.saturating_add(10);
+                }
+                KeyCode::PageUp => {
+                    app.diff_scroll = app.diff_scroll.saturating_sub(10);
+                }
+                _ => {}
+            }
+        }
         Popup::CompareQueuePicker => {
             let filtered: Vec<usize> = app.queues.iter().enumerate()
                 .filter(|(_, q)| {
@@ -1621,6 +1779,243 @@ fn handle_popup_key(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
                     }
                 }
                 _ => {}
+            }
+        }
+        Popup::SavedFilters => {
+            let queue = app.current_queue_name.clone();
+            let count = app.config.filters.get(&queue).map(|f| f.len()).unwrap_or(0);
+            match code {
+                KeyCode::Esc => app.popup = Popup::None,
+                KeyCode::Char('j') | KeyCode::Down => {
+                    let i = app.saved_filter_list_state.selected().unwrap_or(0);
+                    if i + 1 < count { app.saved_filter_list_state.select(Some(i + 1)); }
+                }
+                KeyCode::Char('k') | KeyCode::Up => {
+                    let i = app.saved_filter_list_state.selected().unwrap_or(0);
+                    if i > 0 { app.saved_filter_list_state.select(Some(i - 1)); }
+                }
+                KeyCode::Enter => {
+                    if let Some(sel) = app.saved_filter_list_state.selected() {
+                        // Clone filter data to avoid borrow conflict
+                        let filter_data = app.config.filters.get(&queue)
+                            .and_then(|f| f.get(sel))
+                            .map(|f| (f.expression.clone(), f.advanced, f.name.clone()));
+                        if let Some((expr, advanced, name)) = filter_data {
+                            app.message_filter = expr;
+                            app.message_filter_advanced = advanced;
+                            app.update_filtered_messages();
+                            if !app.filtered_message_indices.is_empty() {
+                                app.message_list_state.select(Some(0));
+                            }
+                            app.popup = Popup::None;
+                            app.set_status(format!("Filter loaded: {}", name), false);
+                        }
+                    }
+                }
+                KeyCode::Char('d') | KeyCode::Delete => {
+                    if let Some(sel) = app.saved_filter_list_state.selected() {
+                        if sel < count {
+                            if let Some(filters) = app.config.filters.get_mut(&queue) {
+                                filters.remove(sel);
+                            }
+                            let _ = app.config.save(app.config_path.as_deref());
+                            let new_count = app.config.filters.get(&queue).map(|f| f.len()).unwrap_or(0);
+                            if new_count == 0 {
+                                app.popup = Popup::None;
+                            } else if sel >= new_count {
+                                app.saved_filter_list_state.select(Some(new_count - 1));
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        Popup::SaveFilter => {
+            match code {
+                KeyCode::Esc => app.popup = Popup::None,
+                KeyCode::Char(c) => app.save_filter_name.push(c),
+                KeyCode::Backspace => { app.save_filter_name.pop(); }
+                KeyCode::Enter => {
+                    if !app.save_filter_name.is_empty() {
+                        let queue = app.current_queue_name.clone();
+                        let filter = crate::config::SavedFilter {
+                            name: app.save_filter_name.clone(),
+                            expression: app.message_filter.clone(),
+                            advanced: app.message_filter_advanced,
+                        };
+                        app.config.filters.entry(queue).or_default().push(filter);
+                        let _ = app.config.save(app.config_path.as_deref());
+                        app.popup = Popup::None;
+                        app.set_status(format!("Filter saved: {}", app.save_filter_name), false);
+                    }
+                }
+                _ => {}
+            }
+        }
+        Popup::TemplatePicker => {
+            let count = app.config.templates.len();
+            match code {
+                KeyCode::Esc => app.popup = Popup::PublishMessage,
+                KeyCode::Char('j') | KeyCode::Down => {
+                    let i = app.template_list_state.selected().unwrap_or(0);
+                    if i + 1 < count { app.template_list_state.select(Some(i + 1)); }
+                }
+                KeyCode::Char('k') | KeyCode::Up => {
+                    let i = app.template_list_state.selected().unwrap_or(0);
+                    if i > 0 { app.template_list_state.select(Some(i - 1)); }
+                }
+                KeyCode::Enter => {
+                    if let Some(sel) = app.template_list_state.selected() {
+                        if let Some(tmpl) = app.config.templates.get(sel) {
+                            // Interpolate variables
+                            let body = interpolate_template(&tmpl.body, &mut app.template_counter);
+                            app.publish_form.body = body;
+                            if !tmpl.routing_key.is_empty() {
+                                app.publish_form.routing_key = tmpl.routing_key.clone();
+                            }
+                            if !tmpl.content_type.is_empty() {
+                                app.publish_form.content_type = tmpl.content_type.clone();
+                            }
+                            app.popup = Popup::PublishMessage;
+                            app.set_status(format!("Template loaded: {}", tmpl.name), false);
+                        }
+                    }
+                }
+                KeyCode::Char('d') | KeyCode::Delete => {
+                    if let Some(sel) = app.template_list_state.selected() {
+                        if sel < count {
+                            app.config.templates.remove(sel);
+                            let _ = app.config.save(app.config_path.as_deref());
+                            if app.config.templates.is_empty() {
+                                app.popup = Popup::PublishMessage;
+                            } else if sel >= app.config.templates.len() {
+                                app.template_list_state.select(Some(app.config.templates.len() - 1));
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        Popup::SaveTemplate => {
+            match code {
+                KeyCode::Esc => app.popup = Popup::PublishMessage,
+                KeyCode::Char(c) => app.save_template_name.push(c),
+                KeyCode::Backspace => { app.save_template_name.pop(); }
+                KeyCode::Enter => {
+                    if !app.save_template_name.is_empty() {
+                        let tmpl = crate::config::MessageTemplate {
+                            name: app.save_template_name.clone(),
+                            routing_key: app.publish_form.routing_key.clone(),
+                            content_type: app.publish_form.content_type.clone(),
+                            body: app.publish_form.body.clone(),
+                        };
+                        app.config.templates.push(tmpl);
+                        let _ = app.config.save(app.config_path.as_deref());
+                        app.popup = Popup::PublishMessage;
+                        app.set_status(format!("Template saved: {}", app.save_template_name), false);
+                    }
+                }
+                _ => {}
+            }
+        }
+        Popup::ReplayConfig => {
+            match code {
+                KeyCode::Esc => app.popup = Popup::None,
+                KeyCode::Tab | KeyCode::Down => {
+                    app.replay_focused_field = (app.replay_focused_field + 1) % 3;
+                }
+                KeyCode::BackTab | KeyCode::Up => {
+                    app.replay_focused_field = (app.replay_focused_field + 2) % 3;
+                }
+                KeyCode::Char(c) => {
+                    match app.replay_focused_field {
+                        0 => app.replay_start.push(c),
+                        1 => app.replay_end.push(c),
+                        2 => app.replay_dest.push(c),
+                        _ => {}
+                    }
+                }
+                KeyCode::Backspace => {
+                    match app.replay_focused_field {
+                        0 => { app.replay_start.pop(); }
+                        1 => { app.replay_end.pop(); }
+                        2 => { app.replay_dest.pop(); }
+                        _ => {}
+                    }
+                }
+                KeyCode::Enter => {
+                    if app.replay_dest.is_empty() {
+                        app.set_status("Destination topic is required", true);
+                    } else {
+                        app.popup = Popup::None;
+                        app.set_status("Replaying messages...", false);
+                        app.do_replay();
+                    }
+                }
+                _ => {}
+            }
+        }
+        Popup::TopologyView => {
+            match code {
+                KeyCode::Esc | KeyCode::Char('X') => {
+                    app.popup = Popup::None;
+                }
+                KeyCode::Char('j') | KeyCode::Down => {
+                    app.topology_scroll = app.topology_scroll.saturating_add(1);
+                }
+                KeyCode::Char('k') | KeyCode::Up => {
+                    app.topology_scroll = app.topology_scroll.saturating_sub(1);
+                }
+                KeyCode::PageDown => {
+                    app.topology_scroll = app.topology_scroll.saturating_add(10);
+                }
+                KeyCode::PageUp => {
+                    app.topology_scroll = app.topology_scroll.saturating_sub(10);
+                }
+                _ => {}
+            }
+        }
+        Popup::BenchmarkConfig => {
+            match code {
+                KeyCode::Esc => app.popup = Popup::None,
+                KeyCode::Tab | KeyCode::Down => {
+                    app.bench_focused_field = (app.bench_focused_field + 1) % 2;
+                }
+                KeyCode::BackTab | KeyCode::Up => {
+                    app.bench_focused_field = (app.bench_focused_field + 1) % 2;
+                }
+                KeyCode::Char(c) if c.is_ascii_digit() => {
+                    match app.bench_focused_field {
+                        0 => app.bench_count.push(c),
+                        1 => app.bench_concurrency.push(c),
+                        _ => {}
+                    }
+                }
+                KeyCode::Backspace => {
+                    match app.bench_focused_field {
+                        0 => { app.bench_count.pop(); }
+                        1 => { app.bench_concurrency.pop(); }
+                        _ => {}
+                    }
+                }
+                KeyCode::Enter => {
+                    app.do_benchmark();
+                }
+                _ => {}
+            }
+        }
+        Popup::BenchmarkRunning => {
+            match code {
+                KeyCode::Esc => {
+                    app.operation_cancel.store(true, std::sync::atomic::Ordering::Relaxed);
+                }
+                _ => {}
+            }
+            // Auto-close when stats arrive
+            if app.bench_stats.is_some() {
+                app.popup = Popup::None;
             }
         }
         Popup::BackendTypePicker => {
