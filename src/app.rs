@@ -1,11 +1,11 @@
 use std::collections::HashSet;
 use std::sync::mpsc;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use ratatui::widgets::ListState;
 
 use crate::config::{Config, Profile};
-use crate::backend::{Backend, BrokerInfo, ConsumerGroupInfo, DetailSection, QueueInfo, MessageInfo};
+use crate::backend::{Backend, BrokerInfo, ConsumerGroupInfo, DetailSection, OffsetResetStrategy, QueueInfo, MessageInfo};
 use crate::ui::theme::{get_theme, Theme};
 use crate::updater::UpdateChecker;
 
@@ -28,6 +28,14 @@ pub enum BgResult {
     OperationComplete(Result<String, String>),
     QueueDetail(Result<Vec<DetailSection>, String>),
     ConsumerGroups(Result<Vec<ConsumerGroupInfo>, String>),
+    OffsetReset(Result<String, String>),
+    ScheduledPublished { id: u64, result: Result<(), String> },
+    CompareMessages {
+        queue_a: String,
+        queue_b: String,
+        messages_a: Result<Vec<MessageInfo>, String>,
+        messages_b: Result<Vec<MessageInfo>, String>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -60,6 +68,13 @@ pub enum Popup {
     EditMessage,
     ConfirmReroute { exchange: String, routing_key: String, count: usize },
     ConsumerGroups,
+    ResetOffsetPicker,
+    ResetOffsetInput,
+    ConfirmResetOffset,
+    ScheduleDelay,
+    ScheduledMessages,
+    CompareQueuePicker,
+    CompareResults,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -69,6 +84,42 @@ pub enum QueueOperation {
 }
 
 pub const FETCH_PRESETS: &[u32] = &[10, 25, 50, 100, 250, 500];
+
+pub const SCHEDULE_PRESETS: &[(u64, &str)] = &[
+    (30, "30 seconds"),
+    (60, "1 minute"),
+    (300, "5 minutes"),
+    (600, "10 minutes"),
+    (1800, "30 minutes"),
+    (3600, "1 hour"),
+];
+
+pub struct QueueComparisonResult {
+    pub queue_a: String,
+    pub queue_b: String,
+    pub only_in_a: Vec<MessageInfo>,
+    pub only_in_b: Vec<MessageInfo>,
+    pub in_both: usize,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum ComparisonTab {
+    Summary,
+    OnlyInA,
+    OnlyInB,
+}
+
+pub struct ScheduledMessage {
+    pub id: u64,
+    pub namespace: String,
+    pub queue: String,
+    pub routing_key: String,
+    pub content_type: String,
+    pub body: String,
+    pub scheduled_at: Instant,
+    pub publish_at: Instant,
+    pub delay_secs: u64,
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ProfileMode {
@@ -157,6 +208,23 @@ pub struct App {
     // Consumer groups popup
     pub consumer_groups: Vec<ConsumerGroupInfo>,
     pub consumer_groups_scroll: u16,
+    pub consumer_groups_selected: Option<usize>,
+
+    // Offset reset
+    pub reset_group_name: String,
+    pub reset_strategy: Option<OffsetResetStrategy>,
+    pub reset_input: String,
+
+    // Queue comparison
+    pub compare_queue_a: String,
+    pub comparison_result: Option<QueueComparisonResult>,
+    pub comparison_tab: ComparisonTab,
+    pub comparison_scroll: u16,
+
+    // Scheduled messages
+    pub scheduled_messages: Vec<ScheduledMessage>,
+    pub scheduled_next_id: u64,
+    pub scheduled_list_state: ListState,
 
     // Auto-update
     pub update_checker: UpdateChecker,
@@ -464,6 +532,17 @@ impl App {
             queue_info_name: String::new(),
             consumer_groups: Vec::new(),
             consumer_groups_scroll: 0,
+            consumer_groups_selected: None,
+            reset_group_name: String::new(),
+            reset_strategy: None,
+            reset_input: String::new(),
+            compare_queue_a: String::new(),
+            comparison_result: None,
+            comparison_tab: ComparisonTab::Summary,
+            comparison_scroll: 0,
+            scheduled_messages: Vec::new(),
+            scheduled_next_id: 1,
+            scheduled_list_state: ListState::default(),
             update_checker: UpdateChecker::new(),
         }
     }
@@ -1112,6 +1191,103 @@ impl App {
         }
     }
 
+    pub fn load_comparison(&self, queue_a: &str, queue_b: &str) {
+        if let Some(ref backend) = self.backend {
+            let backend = backend.clone_backend();
+            let namespace = self.selected_namespace.clone();
+            let qa = queue_a.to_string();
+            let qb = queue_b.to_string();
+            let count = self.fetch_count;
+            let tx = self.bg_sender.clone();
+            std::thread::spawn(move || {
+                let messages_a = backend.peek_messages(&namespace, &qa, count);
+                let messages_b = backend.peek_messages(&namespace, &qb, count);
+                let _ = tx.send(BgResult::CompareMessages {
+                    queue_a: qa,
+                    queue_b: qb,
+                    messages_a,
+                    messages_b,
+                });
+            });
+        }
+    }
+
+    pub fn schedule_message(&mut self, delay_secs: u64) {
+        let now = Instant::now();
+        let msg = ScheduledMessage {
+            id: self.scheduled_next_id,
+            namespace: self.selected_namespace.clone(),
+            queue: if self.current_queue_name.is_empty() {
+                self.publish_form.routing_key.clone()
+            } else {
+                self.current_queue_name.clone()
+            },
+            routing_key: self.publish_form.routing_key.clone(),
+            content_type: self.publish_form.content_type.clone(),
+            body: self.publish_form.body.clone(),
+            scheduled_at: now,
+            publish_at: now + Duration::from_secs(delay_secs),
+            delay_secs,
+        };
+        self.scheduled_next_id += 1;
+        self.scheduled_messages.push(msg);
+    }
+
+    pub fn check_scheduled_messages(&mut self) {
+        let now = Instant::now();
+        let mut to_publish = Vec::new();
+
+        self.scheduled_messages.retain(|msg| {
+            if now >= msg.publish_at {
+                to_publish.push((msg.id, msg.namespace.clone(), msg.queue.clone(),
+                    msg.routing_key.clone(), msg.content_type.clone(), msg.body.clone()));
+                false
+            } else {
+                true
+            }
+        });
+
+        for (id, namespace, queue, routing_key, content_type, body) in to_publish {
+            if let Some(ref backend) = self.backend {
+                let backend = backend.clone_backend();
+                let tx = self.bg_sender.clone();
+                std::thread::spawn(move || {
+                    let result = backend.publish_message(&namespace, &queue, &body, &routing_key, &[], &content_type);
+                    let _ = tx.send(BgResult::ScheduledPublished { id, result });
+                });
+            }
+        }
+    }
+
+    pub fn cancel_scheduled_message(&mut self, id: u64) {
+        self.scheduled_messages.retain(|m| m.id != id);
+    }
+
+    pub fn do_reset_offsets(&self) {
+        if let Some(ref backend) = self.backend {
+            let backend = backend.clone_backend();
+            let namespace = self.selected_namespace.clone();
+            let queue = self.current_queue_name_for_groups().clone();
+            let group = self.reset_group_name.clone();
+            let strategy = match &self.reset_strategy {
+                Some(s) => s.clone(),
+                None => return,
+            };
+            let tx = self.bg_sender.clone();
+            std::thread::spawn(move || {
+                let result = backend.reset_consumer_group_offsets(&namespace, &queue, &group, strategy);
+                let _ = tx.send(BgResult::OffsetReset(result));
+            });
+        }
+    }
+
+    /// Get the queue name for consumer groups context (from selected queue in queue list)
+    pub fn current_queue_name_for_groups(&self) -> String {
+        self.selected_queue()
+            .map(|q| q.name.clone())
+            .unwrap_or_default()
+    }
+
     pub fn load_consumer_groups(&self, queue: &str) {
         if let Some(ref backend) = self.backend {
             let backend = backend.clone_backend();
@@ -1362,6 +1538,52 @@ impl App {
                     self.loading = false;
                     self.set_status(format!("Consumer groups: {}", e), true);
                 }
+                BgResult::CompareMessages { queue_a, queue_b, messages_a, messages_b } => {
+                    self.loading = false;
+                    match (messages_a, messages_b) {
+                        (Ok(ma), Ok(mb)) => {
+                            let result = compute_comparison(&queue_a, &queue_b, ma, mb);
+                            self.comparison_result = Some(result);
+                            self.comparison_tab = ComparisonTab::Summary;
+                            self.comparison_scroll = 0;
+                            self.popup = Popup::CompareResults;
+                        }
+                        (Err(e), _) => {
+                            self.popup = Popup::None;
+                            self.set_status(format!("Failed to load {}: {}", queue_a, e), true);
+                        }
+                        (_, Err(e)) => {
+                            self.popup = Popup::None;
+                            self.set_status(format!("Failed to load {}: {}", queue_b, e), true);
+                        }
+                    }
+                }
+                BgResult::ScheduledPublished { id: _, result } => {
+                    match result {
+                        Ok(()) => {
+                            self.set_status("Scheduled message published", false);
+                            if self.screen == Screen::MessageList {
+                                self.load_messages();
+                            }
+                        }
+                        Err(e) => {
+                            self.set_status(format!("Scheduled publish failed: {}", e), true);
+                        }
+                    }
+                }
+                BgResult::OffsetReset(Ok(msg)) => {
+                    self.popup = Popup::ConsumerGroups;
+                    self.set_status(msg, false);
+                    // Reload consumer groups to show updated offsets
+                    let queue = self.current_queue_name_for_groups();
+                    if !queue.is_empty() {
+                        self.load_consumer_groups(&queue);
+                    }
+                }
+                BgResult::OffsetReset(Err(e)) => {
+                    self.popup = Popup::ConsumerGroups;
+                    self.set_status(format!("Offset reset failed: {}", e), true);
+                }
                 BgResult::QueueDetail(Ok(detail)) => {
                     self.queue_detail = detail;
                     self.queue_info_scroll = 0;
@@ -1408,6 +1630,55 @@ impl App {
         let selected = self.message_list_state.selected()?;
         let idx = *self.filtered_message_indices.get(selected)?;
         self.messages.get(idx)
+    }
+}
+
+fn compute_comparison(queue_a: &str, queue_b: &str, messages_a: Vec<MessageInfo>, messages_b: Vec<MessageInfo>) -> QueueComparisonResult {
+    use std::collections::HashMap;
+    use std::hash::{Hash, Hasher};
+
+    fn hash_body(body: &str) -> u64 {
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        body.hash(&mut hasher);
+        hasher.finish()
+    }
+
+    // Build hash maps: hash -> count for each queue
+    let mut b_hashes: HashMap<u64, Vec<usize>> = HashMap::new();
+    for (i, msg) in messages_b.iter().enumerate() {
+        b_hashes.entry(hash_body(&msg.body)).or_default().push(i);
+    }
+
+    let mut matched_b: HashSet<usize> = HashSet::new();
+    let mut only_in_a = Vec::new();
+    let mut in_both = 0usize;
+
+    for msg in &messages_a {
+        let h = hash_body(&msg.body);
+        if let Some(indices) = b_hashes.get_mut(&h) {
+            // Find an unmatched index in B
+            if let Some(pos) = indices.iter().position(|&idx| !matched_b.contains(&idx)) {
+                matched_b.insert(indices[pos]);
+                in_both += 1;
+            } else {
+                only_in_a.push(msg.clone());
+            }
+        } else {
+            only_in_a.push(msg.clone());
+        }
+    }
+
+    let only_in_b: Vec<MessageInfo> = messages_b.iter().enumerate()
+        .filter(|(i, _)| !matched_b.contains(i))
+        .map(|(_, m)| m.clone())
+        .collect();
+
+    QueueComparisonResult {
+        queue_a: queue_a.to_string(),
+        queue_b: queue_b.to_string(),
+        only_in_a,
+        only_in_b,
+        in_both,
     }
 }
 

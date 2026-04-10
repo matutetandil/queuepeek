@@ -246,6 +246,14 @@ fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
     if !sel_info.is_empty() {
         spans.push(Span::styled(sel_info, Style::default().fg(app.theme.success).bold()));
     }
+    if !app.scheduled_messages.is_empty() {
+        spans.push(Span::styled(
+            format!(" ⏱{} ", app.scheduled_messages.len()),
+            Style::default().fg(app.theme.success).bold(),
+        ));
+        spans.push(Span::styled("S", ks));
+        spans.push(Span::styled(":view ", ds));
+    }
     spans.extend(super::update_hint_spans(app));
     spans.push(Span::styled("  │ ", Style::default().fg(app.theme.divider)));
     spans.push(Span::styled(status_text, Style::default().fg(status_color)));

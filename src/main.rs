@@ -13,6 +13,7 @@ use crossterm::terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScree
 use ratatui::prelude::*;
 
 use app::{App, Popup, ProfileMode, Screen};
+use backend::OffsetResetStrategy;
 use config::Config;
 
 fn main() -> io::Result<()> {
@@ -51,6 +52,7 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App)
 
     loop {
         app.process_bg_results();
+        app.check_scheduled_messages();
         app.update_checker.poll();
 
         // Periodic update check
@@ -367,13 +369,23 @@ fn handle_queue_list_key(app: &mut App, code: KeyCode, modifiers: KeyModifiers) 
             let idx = app::FETCH_PRESETS.iter().position(|&c| c == app.fetch_count).unwrap_or(2);
             app.popup_list_state.select(Some(idx));
         }
-        KeyCode::Char('+') | KeyCode::Char('=') => {
+        KeyCode::Char('+') => {
             if app.fetch_count < 500 { app.fetch_count += 10; }
             app.set_status(format!("Fetch count: {}", app.fetch_count), false);
         }
         KeyCode::Char('-') => {
             app.fetch_count = app.fetch_count.saturating_sub(10).max(1);
             app.set_status(format!("Fetch count: {}", app.fetch_count), false);
+        }
+        KeyCode::Char('=') => {
+            // Compare this queue with another
+            if let Some(q) = app.selected_queue() {
+                app.compare_queue_a = q.name.clone();
+                app.queue_picker_filter.clear();
+                app.queue_picker_filter_active = false;
+                app.popup = Popup::CompareQueuePicker;
+                app.popup_list_state.select(Some(0));
+            }
         }
         KeyCode::Char('P') => {
             // Publish to selected queue
@@ -419,6 +431,7 @@ fn handle_queue_list_key(app: &mut App, code: KeyCode, modifiers: KeyModifiers) 
                 let name = q.name.clone();
                 app.consumer_groups.clear();
                 app.consumer_groups_scroll = 0;
+                app.consumer_groups_selected = Some(0);
                 app.popup = Popup::ConsumerGroups;
                 app.loading = true;
                 app.load_consumer_groups(&name);
@@ -434,6 +447,15 @@ fn handle_queue_list_key(app: &mut App, code: KeyCode, modifiers: KeyModifiers) 
                 app.popup = Popup::QueueInfo;
                 app.loading = true;
                 app.load_queue_detail(&name);
+            }
+        }
+        KeyCode::Char('S') => {
+            // View scheduled messages
+            if !app.scheduled_messages.is_empty() {
+                app.scheduled_list_state.select(Some(0));
+                app.popup = Popup::ScheduledMessages;
+            } else {
+                app.set_status("No scheduled messages", false);
             }
         }
         _ => {}
@@ -646,6 +668,15 @@ fn handle_message_list_key(app: &mut App, code: KeyCode, modifiers: KeyModifiers
             app.loading = true;
             app.load_messages();
             app.set_status("Refreshing messages...", false);
+        }
+        KeyCode::Char('S') => {
+            // View scheduled messages
+            if !app.scheduled_messages.is_empty() {
+                app.scheduled_list_state.select(Some(0));
+                app.popup = Popup::ScheduledMessages;
+            } else {
+                app.set_status("No scheduled messages", false);
+            }
         }
         KeyCode::Char('L') => {
             // DLQ re-route: parse x-death and offer to re-route
@@ -993,6 +1024,16 @@ fn handle_popup_key(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
                 KeyCode::Backspace => {
                     app.publish_form.pop_char();
                 }
+                KeyCode::Char('s') if modifiers.contains(KeyModifiers::CONTROL) => {
+                    // Schedule message with delay
+                    if app.publish_form.body.is_empty() {
+                        app.publish_form.error = "Body is required".into();
+                    } else {
+                        app.publish_form.error.clear();
+                        app.popup = Popup::ScheduleDelay;
+                        app.popup_list_state.select(Some(0));
+                    }
+                }
                 KeyCode::Char(c) => {
                     app.publish_form.push_char(c);
                 }
@@ -1026,6 +1067,15 @@ fn handle_popup_key(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
                 }
                 KeyCode::Backspace => {
                     app.publish_form.pop_char();
+                }
+                KeyCode::Char('s') if modifiers.contains(KeyModifiers::CONTROL) => {
+                    if app.publish_form.body.is_empty() {
+                        app.publish_form.error = "Body is required".into();
+                    } else {
+                        app.publish_form.error.clear();
+                        app.popup = Popup::ScheduleDelay;
+                        app.popup_list_state.select(Some(0));
+                    }
                 }
                 KeyCode::Char(c) => {
                     app.publish_form.push_char(c);
@@ -1220,23 +1270,137 @@ fn handle_popup_key(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
             app.popup = Popup::None;
         }
         Popup::ConsumerGroups => {
+            let group_count = app.consumer_groups.len();
             match code {
                 KeyCode::Char('j') | KeyCode::Down => {
-                    app.consumer_groups_scroll = app.consumer_groups_scroll.saturating_add(1);
+                    if group_count > 0 {
+                        let sel = app.consumer_groups_selected.unwrap_or(0);
+                        if sel + 1 < group_count {
+                            app.consumer_groups_selected = Some(sel + 1);
+                        }
+                    }
                 }
                 KeyCode::Char('k') | KeyCode::Up => {
-                    app.consumer_groups_scroll = app.consumer_groups_scroll.saturating_sub(1);
+                    if group_count > 0 {
+                        let sel = app.consumer_groups_selected.unwrap_or(0);
+                        if sel > 0 {
+                            app.consumer_groups_selected = Some(sel - 1);
+                        }
+                    }
                 }
                 KeyCode::PageDown => {
-                    app.consumer_groups_scroll = app.consumer_groups_scroll.saturating_add(10);
+                    if group_count > 0 {
+                        let sel = app.consumer_groups_selected.unwrap_or(0);
+                        app.consumer_groups_selected = Some((sel + 5).min(group_count - 1));
+                    }
                 }
                 KeyCode::PageUp => {
-                    app.consumer_groups_scroll = app.consumer_groups_scroll.saturating_sub(10);
+                    if group_count > 0 {
+                        let sel = app.consumer_groups_selected.unwrap_or(0);
+                        app.consumer_groups_selected = Some(sel.saturating_sub(5));
+                    }
+                }
+                KeyCode::Char('R') => {
+                    // Reset offsets — only for Kafka
+                    if let Some(ref backend) = app.backend {
+                        if backend.backend_type() != "kafka" {
+                            app.set_status("Offset reset is only supported for Kafka", true);
+                        } else if let Some(sel) = app.consumer_groups_selected {
+                            if sel < group_count {
+                                let group = &app.consumer_groups[sel];
+                                if group.state == "Stable" {
+                                    app.set_status("Cannot reset offsets: group is active (Stable). Stop consumers first.", true);
+                                } else {
+                                    app.reset_group_name = group.name.clone();
+                                    app.popup = Popup::ResetOffsetPicker;
+                                    app.popup_list_state.select(Some(0));
+                                }
+                            }
+                        }
+                    }
                 }
                 KeyCode::Esc | KeyCode::Char('G') => {
                     app.popup = Popup::None;
+                    app.consumer_groups_selected = None;
                 }
                 _ => {}
+            }
+        }
+        Popup::ResetOffsetPicker => {
+            let strategies = ["Earliest", "Latest", "To Timestamp", "To Offset"];
+            match code {
+                KeyCode::Esc => {
+                    app.popup = Popup::ConsumerGroups;
+                }
+                KeyCode::Char('j') | KeyCode::Down => {
+                    let i = app.popup_list_state.selected().unwrap_or(0);
+                    if i + 1 < strategies.len() { app.popup_list_state.select(Some(i + 1)); }
+                }
+                KeyCode::Char('k') | KeyCode::Up => {
+                    let i = app.popup_list_state.selected().unwrap_or(0);
+                    if i > 0 { app.popup_list_state.select(Some(i - 1)); }
+                }
+                KeyCode::Enter => {
+                    let selected = app.popup_list_state.selected().unwrap_or(0);
+                    match selected {
+                        0 => {
+                            app.reset_strategy = Some(OffsetResetStrategy::Earliest);
+                            app.popup = Popup::ConfirmResetOffset;
+                        }
+                        1 => {
+                            app.reset_strategy = Some(OffsetResetStrategy::Latest);
+                            app.popup = Popup::ConfirmResetOffset;
+                        }
+                        2 | 3 => {
+                            // Need input
+                            app.reset_input.clear();
+                            app.popup = Popup::ResetOffsetInput;
+                        }
+                        _ => {}
+                    }
+                }
+                _ => {}
+            }
+        }
+        Popup::ResetOffsetInput => {
+            match code {
+                KeyCode::Esc => {
+                    app.popup = Popup::ResetOffsetPicker;
+                    app.popup_list_state.select(Some(0));
+                }
+                KeyCode::Char(c) if c.is_ascii_digit() || c == '-' => {
+                    app.reset_input.push(c);
+                }
+                KeyCode::Backspace => {
+                    app.reset_input.pop();
+                }
+                KeyCode::Enter => {
+                    if let Ok(val) = app.reset_input.parse::<i64>() {
+                        // Determine which strategy based on the picker selection
+                        let picker_sel = app.popup_list_state.selected().unwrap_or(2);
+                        app.reset_strategy = Some(if picker_sel == 2 {
+                            OffsetResetStrategy::ToTimestamp(val)
+                        } else {
+                            OffsetResetStrategy::ToOffset(val)
+                        });
+                        app.popup = Popup::ConfirmResetOffset;
+                    } else {
+                        app.set_status("Invalid number", true);
+                    }
+                }
+                _ => {}
+            }
+        }
+        Popup::ConfirmResetOffset => {
+            match code {
+                KeyCode::Char('y') | KeyCode::Char('Y') => {
+                    app.popup = Popup::None;
+                    app.do_reset_offsets();
+                    app.set_status("Resetting offsets...", false);
+                }
+                _ => {
+                    app.popup = Popup::ConsumerGroups;
+                }
             }
         }
         Popup::ConfirmReroute { .. } => {
@@ -1294,6 +1458,169 @@ fn handle_popup_key(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
         Popup::OperationProgress => {
             if code == KeyCode::Esc {
                 app.operation_cancel.store(true, std::sync::atomic::Ordering::Relaxed);
+            }
+        }
+        Popup::CompareQueuePicker => {
+            let filtered: Vec<usize> = app.queues.iter().enumerate()
+                .filter(|(_, q)| {
+                    q.name != app.compare_queue_a && (
+                        app.queue_picker_filter.is_empty()
+                        || q.name.to_lowercase().contains(&app.queue_picker_filter.to_lowercase())
+                    )
+                })
+                .map(|(i, _)| i)
+                .collect();
+            let len = filtered.len();
+
+            if app.queue_picker_filter_active {
+                match code {
+                    KeyCode::Char(c) => {
+                        app.queue_picker_filter.push(c);
+                        app.popup_list_state.select(Some(0));
+                    }
+                    KeyCode::Backspace => {
+                        app.queue_picker_filter.pop();
+                        app.popup_list_state.select(Some(0));
+                    }
+                    KeyCode::Esc => {
+                        app.queue_picker_filter.clear();
+                        app.queue_picker_filter_active = false;
+                    }
+                    KeyCode::Enter => {
+                        app.queue_picker_filter_active = false;
+                    }
+                    _ => {}
+                }
+            } else {
+                match code {
+                    KeyCode::Esc => {
+                        app.popup = Popup::None;
+                        app.queue_picker_filter.clear();
+                    }
+                    KeyCode::Char('/') => {
+                        app.queue_picker_filter_active = true;
+                    }
+                    KeyCode::Char('j') | KeyCode::Down => {
+                        let i = app.popup_list_state.selected().unwrap_or(0);
+                        if i + 1 < len { app.popup_list_state.select(Some(i + 1)); }
+                    }
+                    KeyCode::Char('k') | KeyCode::Up => {
+                        let i = app.popup_list_state.selected().unwrap_or(0);
+                        if i > 0 { app.popup_list_state.select(Some(i - 1)); }
+                    }
+                    KeyCode::Enter => {
+                        let selected = app.popup_list_state.selected().unwrap_or(0);
+                        if selected < len {
+                            let dest_idx = filtered[selected];
+                            let queue_b = app.queues[dest_idx].name.clone();
+                            app.popup = Popup::None;
+                            app.queue_picker_filter.clear();
+                            app.loading = true;
+                            app.set_status(format!("Comparing {} vs {}...", app.compare_queue_a, queue_b), false);
+                            let qa = app.compare_queue_a.clone();
+                            app.load_comparison(&qa, &queue_b);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        Popup::CompareResults => {
+            match code {
+                KeyCode::Esc => {
+                    app.popup = Popup::None;
+                    app.comparison_result = None;
+                }
+                KeyCode::Tab => {
+                    app.comparison_tab = match app.comparison_tab {
+                        app::ComparisonTab::Summary => app::ComparisonTab::OnlyInA,
+                        app::ComparisonTab::OnlyInA => app::ComparisonTab::OnlyInB,
+                        app::ComparisonTab::OnlyInB => app::ComparisonTab::Summary,
+                    };
+                    app.comparison_scroll = 0;
+                }
+                KeyCode::BackTab => {
+                    app.comparison_tab = match app.comparison_tab {
+                        app::ComparisonTab::Summary => app::ComparisonTab::OnlyInB,
+                        app::ComparisonTab::OnlyInA => app::ComparisonTab::Summary,
+                        app::ComparisonTab::OnlyInB => app::ComparisonTab::OnlyInA,
+                    };
+                    app.comparison_scroll = 0;
+                }
+                KeyCode::Char('j') | KeyCode::Down => {
+                    app.comparison_scroll = app.comparison_scroll.saturating_add(1);
+                }
+                KeyCode::Char('k') | KeyCode::Up => {
+                    app.comparison_scroll = app.comparison_scroll.saturating_sub(1);
+                }
+                KeyCode::PageDown => {
+                    app.comparison_scroll = app.comparison_scroll.saturating_add(10);
+                }
+                KeyCode::PageUp => {
+                    app.comparison_scroll = app.comparison_scroll.saturating_sub(10);
+                }
+                _ => {}
+            }
+        }
+        Popup::ScheduleDelay => {
+            let presets = app::SCHEDULE_PRESETS;
+            match code {
+                KeyCode::Esc => {
+                    // Go back to publish popup
+                    app.popup = Popup::PublishMessage;
+                }
+                KeyCode::Char('j') | KeyCode::Down => {
+                    let i = app.popup_list_state.selected().unwrap_or(0);
+                    if i + 1 < presets.len() { app.popup_list_state.select(Some(i + 1)); }
+                }
+                KeyCode::Char('k') | KeyCode::Up => {
+                    let i = app.popup_list_state.selected().unwrap_or(0);
+                    if i > 0 { app.popup_list_state.select(Some(i - 1)); }
+                }
+                KeyCode::Enter => {
+                    let selected = app.popup_list_state.selected().unwrap_or(0);
+                    if selected < presets.len() {
+                        let delay_secs = presets[selected].0;
+                        app.schedule_message(delay_secs);
+                        app.popup = Popup::None;
+                        app.set_status(format!("Message scheduled ({})", presets[selected].1), false);
+                    }
+                }
+                _ => {}
+            }
+        }
+        Popup::ScheduledMessages => {
+            let count = app.scheduled_messages.len();
+            match code {
+                KeyCode::Esc => {
+                    app.popup = Popup::None;
+                }
+                KeyCode::Char('j') | KeyCode::Down => {
+                    if count > 0 {
+                        let i = app.scheduled_list_state.selected().unwrap_or(0);
+                        if i + 1 < count { app.scheduled_list_state.select(Some(i + 1)); }
+                    }
+                }
+                KeyCode::Char('k') | KeyCode::Up => {
+                    let i = app.scheduled_list_state.selected().unwrap_or(0);
+                    if i > 0 { app.scheduled_list_state.select(Some(i - 1)); }
+                }
+                KeyCode::Char('d') | KeyCode::Delete => {
+                    // Cancel selected scheduled message
+                    if let Some(sel) = app.scheduled_list_state.selected() {
+                        if sel < count {
+                            let id = app.scheduled_messages[sel].id;
+                            app.cancel_scheduled_message(id);
+                            app.set_status("Scheduled message cancelled", false);
+                            if app.scheduled_messages.is_empty() {
+                                app.popup = Popup::None;
+                            } else if sel >= app.scheduled_messages.len() {
+                                app.scheduled_list_state.select(Some(app.scheduled_messages.len() - 1));
+                            }
+                        }
+                    }
+                }
+                _ => {}
             }
         }
         Popup::BackendTypePicker => {

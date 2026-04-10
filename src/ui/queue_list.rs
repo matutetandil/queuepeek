@@ -238,11 +238,21 @@ fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
         Span::styled(":del ", ds),
         Span::styled("i", ks),
         Span::styled(":info ", ds),
+        Span::styled("=", ks),
+        Span::styled(":compare ", ds),
         Span::styled("G", ks),
         Span::styled(":groups ", ds),
         Span::styled("?", ks),
         Span::styled(":help", ds),
     ];
+    if !app.scheduled_messages.is_empty() {
+        spans.push(Span::styled(
+            format!(" ⏱{} ", app.scheduled_messages.len()),
+            Style::default().fg(app.theme.success).bold(),
+        ));
+        spans.push(Span::styled("S", ks));
+        spans.push(Span::styled(":view ", ds));
+    }
     spans.extend(super::update_hint_spans(app));
     spans.push(Span::styled("  │ ", Style::default().fg(app.theme.divider)));
     spans.push(Span::styled(status_text, Style::default().fg(status_color)));

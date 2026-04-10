@@ -9,7 +9,7 @@ use rdkafka::message::{Headers, Message};
 use rdkafka::TopicPartitionList;
 use rdkafka::Offset;
 
-use super::{Backend, BrokerInfo, ConsumerGroupInfo, ConsumerGroupPartition, DetailEntry, DetailSection, MessageInfo, QueueInfo};
+use super::{Backend, BrokerInfo, ConsumerGroupInfo, ConsumerGroupPartition, DetailEntry, DetailSection, MessageInfo, OffsetResetStrategy, QueueInfo};
 use crate::config::Profile;
 
 pub struct KafkaBackend {
@@ -672,6 +672,77 @@ impl Backend for KafkaBackend {
         }
 
         Ok(sections)
+    }
+
+    fn reset_consumer_group_offsets(
+        &self,
+        _namespace: &str,
+        queue: &str,
+        group: &str,
+        strategy: OffsetResetStrategy,
+    ) -> Result<String, String> {
+        let consumer: BaseConsumer = self.base_config()
+            .set("group.id", group)
+            .set("enable.auto.commit", "false")
+            .create()
+            .map_err(|e| format!("Creating consumer: {}", e))?;
+
+        let metadata = consumer
+            .fetch_metadata(Some(queue), Duration::from_secs(10))
+            .map_err(|e| format!("Fetching metadata: {}", e))?;
+
+        let topic = metadata.topics().first()
+            .ok_or_else(|| "Topic not found".to_string())?;
+
+        let partition_ids: Vec<i32> = topic.partitions().iter().map(|p| p.id()).collect();
+
+        let mut tpl = TopicPartitionList::new();
+
+        match strategy {
+            OffsetResetStrategy::Earliest => {
+                for &pid in &partition_ids {
+                    let (low, _) = consumer.fetch_watermarks(queue, pid, Duration::from_secs(5))
+                        .map_err(|e| format!("Fetch watermarks: {}", e))?;
+                    tpl.add_partition_offset(queue, pid, Offset::Offset(low))
+                        .map_err(|e| format!("Adding offset: {}", e))?;
+                }
+            }
+            OffsetResetStrategy::Latest => {
+                for &pid in &partition_ids {
+                    let (_, high) = consumer.fetch_watermarks(queue, pid, Duration::from_secs(5))
+                        .map_err(|e| format!("Fetch watermarks: {}", e))?;
+                    tpl.add_partition_offset(queue, pid, Offset::Offset(high))
+                        .map_err(|e| format!("Adding offset: {}", e))?;
+                }
+            }
+            OffsetResetStrategy::ToTimestamp(ts) => {
+                let mut ts_tpl = TopicPartitionList::new();
+                for &pid in &partition_ids {
+                    ts_tpl.add_partition_offset(queue, pid, Offset::Offset(ts))
+                        .map_err(|e| format!("Adding offset: {}", e))?;
+                }
+                tpl = consumer.offsets_for_times(ts_tpl, Duration::from_secs(10))
+                    .map_err(|e| format!("Offsets for times: {}", e))?;
+            }
+            OffsetResetStrategy::ToOffset(offset) => {
+                for &pid in &partition_ids {
+                    tpl.add_partition_offset(queue, pid, Offset::Offset(offset))
+                        .map_err(|e| format!("Adding offset: {}", e))?;
+                }
+            }
+        }
+
+        consumer.commit(&tpl, rdkafka::consumer::CommitMode::Sync)
+            .map_err(|e| format!("Committing offsets: {}", e))?;
+
+        let strategy_name = match strategy {
+            OffsetResetStrategy::Earliest => "earliest".to_string(),
+            OffsetResetStrategy::Latest => "latest".to_string(),
+            OffsetResetStrategy::ToTimestamp(ts) => format!("timestamp {}", ts),
+            OffsetResetStrategy::ToOffset(o) => format!("offset {}", o),
+        };
+
+        Ok(format!("Reset offsets for group '{}' on '{}' to {}", group, queue, strategy_name))
     }
 
     fn clone_backend(&self) -> Box<dyn Backend> {

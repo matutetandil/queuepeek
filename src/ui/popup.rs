@@ -2,6 +2,7 @@ use ratatui::prelude::*;
 use ratatui::widgets::*;
 
 use crate::app::{App, Popup, PublishForm, QueueOperation};
+use crate::backend::OffsetResetStrategy;
 
 pub fn draw(frame: &mut Frame, app: &mut App) {
     match &app.popup {
@@ -27,6 +28,13 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         Popup::ImportFile => draw_import_file(frame, app),
         Popup::QueueInfo => draw_queue_info(frame, app),
         Popup::ConsumerGroups => draw_consumer_groups(frame, app),
+        Popup::ResetOffsetPicker => draw_reset_offset_picker(frame, app),
+        Popup::ResetOffsetInput => draw_reset_offset_input(frame, app),
+        Popup::ConfirmResetOffset => draw_confirm_reset_offset(frame, app),
+        Popup::ScheduleDelay => draw_schedule_delay(frame, app),
+        Popup::ScheduledMessages => draw_scheduled_messages(frame, app),
+        Popup::CompareQueuePicker => draw_compare_queue_picker(frame, app),
+        Popup::CompareResults => draw_compare_results(frame, app),
         Popup::ConfirmReroute { ref exchange, ref routing_key, count } => {
             let msg = format!(
                 "Re-route {} message(s) to:\n\n  Exchange:    {}\n  Routing Key: {}\n\nThis will publish to the original exchange.\nThe messages remain in the current queue.",
@@ -79,6 +87,8 @@ fn draw_help(frame: &mut Frame, app: &App) {
         ("D", "Delete queue"),
         ("i", "Queue info (stats, config)"),
         ("G", "Consumer groups (Kafka)"),
+        ("R", "Reset group offsets (Kafka)"),
+        ("=", "Compare two queues"),
         ("C", "Copy messages to queue"),
         ("m", "Move messages to queue"),
         ("spc", "Select message (list)"),
@@ -90,6 +100,8 @@ fn draw_help(frame: &mut Frame, app: &App) {
         ("L", "DLQ re-route (x-death)"),
         ("T", "Toggle tail / auto-refresh"),
         ("r", "Refresh messages"),
+        ("Ctrl+S", "Schedule message (publish)"),
+        ("S", "View scheduled messages"),
         ("E", "Edit & re-publish (detail)"),
         ("esc", "Go back"),
         ("?", "Toggle help"),
@@ -364,6 +376,7 @@ fn draw_publish(frame: &mut Frame, app: &mut App, title: &str) {
             Span::styled("tab", ks), Span::styled(":next ", ds),
             Span::styled(hint, Style::default().fg(app.theme.accent)),
             Span::styled("  ", ds),
+            Span::styled("ctrl+s", ks), Span::styled(":schedule ", ds),
             Span::styled("esc", ks), Span::styled(":cancel", ds),
         ])).style(Style::default().bg(app.theme.bg)),
         Rect::new(inner.x, footer_y, inner.width, 1),
@@ -673,10 +686,14 @@ fn draw_consumer_groups(frame: &mut Frame, app: &App) {
     let lag_warn_style = Style::default().fg(app.theme.error).bold();
     let lag_ok_style = Style::default().fg(app.theme.success);
 
-    for group in &app.consumer_groups {
+    let selected = app.consumer_groups_selected;
+
+    for (gi, group) in app.consumer_groups.iter().enumerate() {
         if !lines.is_empty() {
             lines.push(Line::from(""));
         }
+
+        let is_selected = selected == Some(gi);
 
         // Group header
         let state_style = if group.state == "Stable" {
@@ -685,8 +702,16 @@ fn draw_consumer_groups(frame: &mut Frame, app: &App) {
             Style::default().fg(app.theme.muted)
         };
 
+        let indicator = if is_selected { "▸ " } else { "  " };
+        let group_name_style = if is_selected {
+            Style::default().fg(app.theme.accent).bold().bg(app.theme.selected_bg)
+        } else {
+            name_style
+        };
+
         lines.push(Line::from(vec![
-            Span::styled(format!("  {} ", group.name), name_style),
+            Span::styled(indicator, group_name_style),
+            Span::styled(format!("{} ", group.name), group_name_style),
             Span::styled(format!("({})", group.state), state_style),
         ]));
 
@@ -723,14 +748,413 @@ fn draw_consumer_groups(frame: &mut Frame, app: &App) {
     lines.push(Line::from(""));
     lines.push(Line::from(vec![
         Span::styled("  j/k", Style::default().fg(app.theme.accent).bold()),
-        Span::styled(":scroll  ", Style::default().fg(app.theme.muted)),
+        Span::styled(":navigate  ", Style::default().fg(app.theme.muted)),
+        Span::styled("R", Style::default().fg(app.theme.accent).bold()),
+        Span::styled(":reset offsets  ", Style::default().fg(app.theme.muted)),
         Span::styled("esc", Style::default().fg(app.theme.accent).bold()),
         Span::styled(":close", Style::default().fg(app.theme.muted)),
     ]));
 
-    let scroll = app.consumer_groups_scroll;
+    // Auto-scroll to keep selected group visible
+    let scroll = if let Some(sel) = selected {
+        // Estimate line position of selected group (roughly 4+ lines per group)
+        let estimated_line = app.consumer_groups.iter().take(sel)
+            .map(|g| 3 + g.partitions.len() + 1) // header + members + header_row + partitions + blank
+            .sum::<usize>();
+        let visible_height = inner.height as usize;
+        if estimated_line >= visible_height {
+            (estimated_line - visible_height / 2) as u16
+        } else {
+            0
+        }
+    } else {
+        0
+    };
+
     let content = Paragraph::new(lines)
         .style(Style::default().bg(app.theme.bg))
         .scroll((scroll, 0));
+    frame.render_widget(content, inner);
+}
+
+fn draw_reset_offset_picker(frame: &mut Frame, app: &mut App) {
+    let popup_area = centered_rect(40, 35, frame.area());
+    frame.render_widget(Clear, popup_area);
+
+    let title = format!(" Reset Offsets: {} ", app.reset_group_name);
+    let block = Block::bordered()
+        .title(title)
+        .title_style(Style::default().fg(app.theme.accent).bold())
+        .border_style(Style::default().fg(app.theme.accent))
+        .style(Style::default().bg(app.theme.bg));
+
+    let strategies = ["Earliest (beginning)", "Latest (end)", "To Timestamp (unix ms)", "To Offset (specific)"];
+    let items: Vec<ListItem> = strategies.iter().map(|&s| {
+        ListItem::new(Line::from(Span::styled(
+            format!("  {}", s),
+            Style::default().fg(app.theme.primary),
+        )))
+    }).collect();
+
+    let list = List::new(items)
+        .block(block)
+        .highlight_style(Style::default().bg(app.theme.selected_bg).fg(app.theme.white).add_modifier(Modifier::BOLD))
+        .highlight_symbol("▸ ")
+        .style(Style::default().bg(app.theme.bg));
+
+    frame.render_stateful_widget(list, popup_area, &mut app.popup_list_state);
+}
+
+fn draw_reset_offset_input(frame: &mut Frame, app: &App) {
+    let popup_area = centered_rect(45, 20, frame.area());
+    frame.render_widget(Clear, popup_area);
+
+    let picker_sel = app.popup_list_state.selected().unwrap_or(2);
+    let label = if picker_sel == 2 { "Timestamp (unix millis)" } else { "Offset" };
+    let title = format!(" Enter {} ", label);
+
+    let block = Block::bordered()
+        .title(title)
+        .title_style(Style::default().fg(app.theme.accent).bold())
+        .border_style(Style::default().fg(app.theme.accent))
+        .style(Style::default().bg(app.theme.bg));
+
+    let inner = block.inner(popup_area);
+    frame.render_widget(block, popup_area);
+
+    let lines = vec![
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("  Value: ", Style::default().fg(app.theme.muted)),
+            Span::styled(&app.reset_input, Style::default().fg(app.theme.primary).bold()),
+            Span::styled("█", Style::default().fg(app.theme.accent)),
+        ]),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("  enter", Style::default().fg(app.theme.accent).bold()),
+            Span::styled(":confirm  ", Style::default().fg(app.theme.muted)),
+            Span::styled("esc", Style::default().fg(app.theme.accent).bold()),
+            Span::styled(":back", Style::default().fg(app.theme.muted)),
+        ]),
+    ];
+
+    let content = Paragraph::new(lines).style(Style::default().bg(app.theme.bg));
+    frame.render_widget(content, inner);
+}
+
+fn draw_confirm_reset_offset(frame: &mut Frame, app: &App) {
+    let strategy_desc = match &app.reset_strategy {
+        Some(OffsetResetStrategy::Earliest) => "earliest (beginning)".to_string(),
+        Some(OffsetResetStrategy::Latest) => "latest (end)".to_string(),
+        Some(OffsetResetStrategy::ToTimestamp(ts)) => format!("timestamp {}", ts),
+        Some(OffsetResetStrategy::ToOffset(o)) => format!("offset {}", o),
+        None => "unknown".to_string(),
+    };
+    let msg = format!(
+        "Reset offsets for group '{}'?\n\nStrategy: {}\n\nThis will change committed offsets.\nThe group must be inactive (no consumers).",
+        app.reset_group_name, strategy_desc,
+    );
+    draw_confirm(frame, app, "Reset Offsets", &msg);
+}
+
+fn draw_schedule_delay(frame: &mut Frame, app: &mut App) {
+    use crate::app::SCHEDULE_PRESETS;
+
+    let popup_area = centered_rect(35, 40, frame.area());
+    frame.render_widget(Clear, popup_area);
+
+    let block = Block::bordered()
+        .title(" Schedule Delay ")
+        .title_style(Style::default().fg(app.theme.accent).bold())
+        .border_style(Style::default().fg(app.theme.accent))
+        .style(Style::default().bg(app.theme.bg));
+
+    let items: Vec<ListItem> = SCHEDULE_PRESETS.iter().map(|(_, label)| {
+        ListItem::new(Line::from(Span::styled(
+            format!("  {}", label),
+            Style::default().fg(app.theme.primary),
+        )))
+    }).collect();
+
+    let list = List::new(items)
+        .block(block)
+        .highlight_style(Style::default().bg(app.theme.selected_bg).fg(app.theme.white).add_modifier(Modifier::BOLD))
+        .highlight_symbol("▸ ")
+        .style(Style::default().bg(app.theme.bg));
+
+    frame.render_stateful_widget(list, popup_area, &mut app.popup_list_state);
+}
+
+fn draw_scheduled_messages(frame: &mut Frame, app: &mut App) {
+    let popup_area = centered_rect(60, 60, frame.area());
+    frame.render_widget(Clear, popup_area);
+
+    let count = app.scheduled_messages.len();
+    let title = format!(" Scheduled Messages ({}) ", count);
+    let block = Block::bordered()
+        .title(title)
+        .title_style(Style::default().fg(app.theme.accent).bold())
+        .border_style(Style::default().fg(app.theme.accent))
+        .style(Style::default().bg(app.theme.bg));
+
+    if app.scheduled_messages.is_empty() {
+        let inner = block.inner(popup_area);
+        frame.render_widget(block, popup_area);
+        let empty = Paragraph::new(Line::from(Span::styled(
+            "  No scheduled messages",
+            Style::default().fg(app.theme.muted),
+        ))).style(Style::default().bg(app.theme.bg));
+        frame.render_widget(empty, inner);
+        return;
+    }
+
+    let now = std::time::Instant::now();
+    let items: Vec<ListItem> = app.scheduled_messages.iter().map(|msg| {
+        let remaining = if msg.publish_at > now {
+            let secs = (msg.publish_at - now).as_secs();
+            if secs >= 3600 {
+                format!("{}h {}m", secs / 3600, (secs % 3600) / 60)
+            } else if secs >= 60 {
+                format!("{}m {}s", secs / 60, secs % 60)
+            } else {
+                format!("{}s", secs)
+            }
+        } else {
+            "publishing...".to_string()
+        };
+
+        let body_preview: String = msg.body.chars().take(40).collect();
+        let body_preview = body_preview.replace('\n', " ");
+
+        ListItem::new(Line::from(vec![
+            Span::styled(format!("  {} ", remaining), Style::default().fg(app.theme.success).bold()),
+            Span::styled(format!("→ {} ", msg.queue), Style::default().fg(app.theme.accent)),
+            Span::styled(body_preview, Style::default().fg(app.theme.muted)),
+        ]))
+    }).collect();
+
+    // Footer inside the block
+    let footer_line = ListItem::new(Line::from(vec![
+        Span::styled("  d", Style::default().fg(app.theme.accent).bold()),
+        Span::styled(":cancel  ", Style::default().fg(app.theme.muted)),
+        Span::styled("esc", Style::default().fg(app.theme.accent).bold()),
+        Span::styled(":close", Style::default().fg(app.theme.muted)),
+    ]));
+
+    let mut all_items = items;
+    all_items.push(ListItem::new(Line::from("")));
+    all_items.push(footer_line);
+
+    let list = List::new(all_items)
+        .block(block)
+        .highlight_style(Style::default().bg(app.theme.selected_bg).fg(app.theme.white).add_modifier(Modifier::BOLD))
+        .highlight_symbol("▸ ")
+        .style(Style::default().bg(app.theme.bg));
+
+    frame.render_stateful_widget(list, popup_area, &mut app.scheduled_list_state);
+}
+
+fn draw_compare_queue_picker(frame: &mut Frame, app: &mut App) {
+    let popup_area = centered_rect(50, 60, frame.area());
+    frame.render_widget(Clear, popup_area);
+
+    let title = format!(" Compare: {} vs ... ", app.compare_queue_a);
+    let block = Block::bordered()
+        .title(title)
+        .title_style(Style::default().fg(app.theme.accent).bold())
+        .border_style(Style::default().fg(app.theme.accent))
+        .style(Style::default().bg(app.theme.bg));
+
+    let filtered: Vec<&crate::backend::QueueInfo> = app.queues.iter()
+        .filter(|q| {
+            q.name != app.compare_queue_a && (
+                app.queue_picker_filter.is_empty()
+                || q.name.to_lowercase().contains(&app.queue_picker_filter.to_lowercase())
+            )
+        })
+        .collect();
+
+    let mut items: Vec<ListItem> = Vec::new();
+
+    // Filter bar
+    if app.queue_picker_filter_active || !app.queue_picker_filter.is_empty() {
+        items.push(ListItem::new(Line::from(vec![
+            Span::styled("  /", Style::default().fg(app.theme.accent)),
+            Span::styled(&app.queue_picker_filter, Style::default().fg(app.theme.primary)),
+            if app.queue_picker_filter_active {
+                Span::styled("█", Style::default().fg(app.theme.accent))
+            } else {
+                Span::styled("", Style::default())
+            },
+        ])));
+        items.push(ListItem::new(Line::from("")));
+    }
+
+    for q in &filtered {
+        items.push(ListItem::new(Line::from(vec![
+            Span::styled(format!("  {} ", q.name), Style::default().fg(app.theme.primary)),
+            Span::styled(format!("({} msgs)", q.messages), Style::default().fg(app.theme.muted)),
+        ])));
+    }
+
+    let list = List::new(items)
+        .block(block)
+        .highlight_style(Style::default().bg(app.theme.selected_bg).fg(app.theme.white).add_modifier(Modifier::BOLD))
+        .highlight_symbol("▸ ")
+        .style(Style::default().bg(app.theme.bg));
+
+    frame.render_stateful_widget(list, popup_area, &mut app.popup_list_state);
+}
+
+fn draw_compare_results(frame: &mut Frame, app: &App) {
+    let popup_area = centered_rect(80, 80, frame.area());
+    frame.render_widget(Clear, popup_area);
+
+    let result = match &app.comparison_result {
+        Some(r) => r,
+        None => return,
+    };
+
+    let title = format!(" Compare: {} vs {} ", result.queue_a, result.queue_b);
+    let block = Block::bordered()
+        .title(title)
+        .title_style(Style::default().fg(app.theme.accent).bold())
+        .border_style(Style::default().fg(app.theme.accent))
+        .style(Style::default().bg(app.theme.bg));
+
+    let inner = block.inner(popup_area);
+    frame.render_widget(block, popup_area);
+
+    let ks = Style::default().fg(app.theme.accent).bold();
+    let ds = Style::default().fg(app.theme.muted);
+    let active_tab = Style::default().fg(app.theme.accent).bold().bg(app.theme.selected_bg);
+    let inactive_tab = Style::default().fg(app.theme.muted);
+
+    // Tab bar
+    let tab_style = |tab: &crate::app::ComparisonTab| {
+        if *tab == app.comparison_tab { active_tab } else { inactive_tab }
+    };
+
+    let mut lines: Vec<Line> = Vec::new();
+
+    lines.push(Line::from(vec![
+        Span::styled(" [Summary]", tab_style(&crate::app::ComparisonTab::Summary)),
+        Span::styled(" ", ds),
+        Span::styled(
+            format!("[Only in A ({})]", result.only_in_a.len()),
+            tab_style(&crate::app::ComparisonTab::OnlyInA),
+        ),
+        Span::styled(" ", ds),
+        Span::styled(
+            format!("[Only in B ({})]", result.only_in_b.len()),
+            tab_style(&crate::app::ComparisonTab::OnlyInB),
+        ),
+    ]));
+
+    lines.push(Line::from(""));
+
+    match app.comparison_tab {
+        crate::app::ComparisonTab::Summary => {
+            lines.push(Line::from(vec![
+                Span::styled("  Queue A: ", ds),
+                Span::styled(&result.queue_a, Style::default().fg(app.theme.primary).bold()),
+            ]));
+            lines.push(Line::from(vec![
+                Span::styled("  Queue B: ", ds),
+                Span::styled(&result.queue_b, Style::default().fg(app.theme.primary).bold()),
+            ]));
+            lines.push(Line::from(""));
+            lines.push(Line::from(vec![
+                Span::styled("  In both:    ", ds),
+                Span::styled(
+                    result.in_both.to_string(),
+                    Style::default().fg(app.theme.success).bold(),
+                ),
+            ]));
+            lines.push(Line::from(vec![
+                Span::styled("  Only in A:  ", ds),
+                Span::styled(
+                    result.only_in_a.len().to_string(),
+                    if result.only_in_a.is_empty() {
+                        Style::default().fg(app.theme.muted)
+                    } else {
+                        Style::default().fg(app.theme.error).bold()
+                    },
+                ),
+            ]));
+            lines.push(Line::from(vec![
+                Span::styled("  Only in B:  ", ds),
+                Span::styled(
+                    result.only_in_b.len().to_string(),
+                    if result.only_in_b.is_empty() {
+                        Style::default().fg(app.theme.muted)
+                    } else {
+                        Style::default().fg(app.theme.error).bold()
+                    },
+                ),
+            ]));
+
+            if result.only_in_a.is_empty() && result.only_in_b.is_empty() {
+                lines.push(Line::from(""));
+                lines.push(Line::from(Span::styled(
+                    "  Queues are identical (by message body)",
+                    Style::default().fg(app.theme.success).bold(),
+                )));
+            }
+        }
+        crate::app::ComparisonTab::OnlyInA => {
+            if result.only_in_a.is_empty() {
+                lines.push(Line::from(Span::styled(
+                    "  No unique messages in this queue",
+                    ds,
+                )));
+            } else {
+                for (i, msg) in result.only_in_a.iter().enumerate() {
+                    let body_preview: String = msg.body.chars().take(80).collect();
+                    let body_preview = body_preview.replace('\n', " ");
+                    lines.push(Line::from(vec![
+                        Span::styled(format!("  {}. ", i + 1), Style::default().fg(app.theme.muted)),
+                        Span::styled(&msg.routing_key, Style::default().fg(app.theme.accent)),
+                        Span::styled(" ", ds),
+                        Span::styled(body_preview, Style::default().fg(app.theme.primary)),
+                    ]));
+                }
+            }
+        }
+        crate::app::ComparisonTab::OnlyInB => {
+            if result.only_in_b.is_empty() {
+                lines.push(Line::from(Span::styled(
+                    "  No unique messages in this queue",
+                    ds,
+                )));
+            } else {
+                for (i, msg) in result.only_in_b.iter().enumerate() {
+                    let body_preview: String = msg.body.chars().take(80).collect();
+                    let body_preview = body_preview.replace('\n', " ");
+                    lines.push(Line::from(vec![
+                        Span::styled(format!("  {}. ", i + 1), Style::default().fg(app.theme.muted)),
+                        Span::styled(&msg.routing_key, Style::default().fg(app.theme.accent)),
+                        Span::styled(" ", ds),
+                        Span::styled(body_preview, Style::default().fg(app.theme.primary)),
+                    ]));
+                }
+            }
+        }
+    }
+
+    // Footer
+    lines.push(Line::from(""));
+    lines.push(Line::from(vec![
+        Span::styled("  tab", ks),
+        Span::styled(":switch tab  ", ds),
+        Span::styled("j/k", ks),
+        Span::styled(":scroll  ", ds),
+        Span::styled("esc", ks),
+        Span::styled(":close", ds),
+    ]));
+
+    let content = Paragraph::new(lines)
+        .style(Style::default().bg(app.theme.bg))
+        .scroll((app.comparison_scroll, 0));
     frame.render_widget(content, inner);
 }

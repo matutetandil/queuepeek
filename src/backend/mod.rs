@@ -76,6 +76,15 @@ pub struct ConsumerGroupPartition {
     pub lag: i64,
 }
 
+/// Strategy for resetting consumer group offsets
+#[derive(Debug, Clone)]
+pub enum OffsetResetStrategy {
+    Earliest,
+    Latest,
+    ToTimestamp(i64),     // unix millis
+    ToOffset(i64),        // specific offset (applied to all partitions)
+}
+
 /// Generic backend trait — implement for each broker type
 pub trait Backend: Send {
     fn backend_type(&self) -> &str;
@@ -134,5 +143,16 @@ pub trait Backend: Send {
     /// Get detailed queue/topic information as structured sections
     fn queue_detail(&self, _namespace: &str, _queue: &str) -> Result<Vec<DetailSection>, String> {
         Err("Queue detail not supported by this backend".into())
+    }
+
+    /// Reset consumer group offsets for a queue/topic
+    fn reset_consumer_group_offsets(
+        &self,
+        _namespace: &str,
+        _queue: &str,
+        _group: &str,
+        _strategy: OffsetResetStrategy,
+    ) -> Result<String, String> {
+        Err("Offset reset not supported by this backend".into())
     }
 }

@@ -1,5 +1,39 @@
 # Changelog
 
+## [0.5.0] - 2026-04-09
+
+### Added
+- Message scheduling with in-app timer (works on all backends)
+  - Press `Ctrl+S` from the publish popup (`P`) or edit popup (`E`) to schedule instead of sending immediately
+  - Schedule delay picker with presets: 30s, 1m, 5m, 10m, 30m, 1h
+  - Scheduled messages are held in memory with a countdown timer
+  - View and cancel pending scheduled messages with `S` from queue list or message list
+  - Cancel individual scheduled messages with `d` from the scheduled messages popup
+  - Footer indicator shows count of pending scheduled messages (`⏱N`)
+  - When the timer expires, the message is published via the normal `backend.publish_message()` path
+  - Note: scheduled messages are lost on app restart (in-memory only)
+- Queue comparison / diff between two queues (`=` key on queue list)
+  - Opens a queue picker to select the second queue (filter supported)
+  - Fetches messages from both queues using the current fetch count
+  - Computes diff by hashing message bodies
+  - Results shown in a tabbed popup with three tabs:
+    - Summary: counts for "in both", "only in A", "only in B", identical indicator
+    - Only in A: list of messages unique to the first queue
+    - Only in B: list of messages unique to the second queue
+  - Navigate tabs with `Tab`/`Shift+Tab`, scroll with `j`/`k`
+  - Useful for comparing a queue with its DLQ or verifying copy/move success
+- Kafka consumer group offset reset (`R` in consumer groups popup)
+  - Consumer groups popup (`G`) is now selectable with `j`/`k` navigation and a selection highlight (`▸`)
+  - Press `R` on a selected group to reset its offsets
+  - Only available for Kafka; refuses to reset if the group is in `Stable` (active) state
+  - Strategy picker: Earliest (beginning of topic), Latest (end of topic), To Timestamp (unix ms), To Offset (specific offset)
+  - For timestamp and offset strategies, a text input popup accepts the target value
+  - Confirmation popup shows group name and strategy before executing
+  - Uses rdkafka committed offsets commit to apply the reset
+  - Consumer groups popup footer now shows `R:reset` hint
+
+---
+
 ## [0.4.0] - 2026-04-08
 
 ### Added
