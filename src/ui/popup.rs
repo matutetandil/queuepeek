@@ -44,6 +44,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         Popup::TopologyView => draw_topology(frame, app),
         Popup::BenchmarkConfig => draw_benchmark_config(frame, app),
         Popup::BenchmarkRunning => draw_benchmark_running(frame, app),
+        Popup::RetainedMessages => draw_retained_messages(frame, app),
         Popup::ConfirmReroute { ref exchange, ref routing_key, count } => {
             let msg = format!(
                 "Re-route {} message(s) to:\n\n  Exchange:    {}\n  Routing Key: {}\n\nThis will publish to the original exchange.\nThe messages remain in the current queue.",
@@ -1565,4 +1566,66 @@ fn draw_benchmark_running(frame: &mut Frame, app: &App) {
         let status_area = Rect::new(inner.x, inner.y + 3, inner.width, 1);
         frame.render_widget(Paragraph::new(Span::styled(status_line, Style::default().fg(app.theme.primary))).style(Style::default().bg(app.theme.bg)), status_area);
     }
+}
+
+fn draw_retained_messages(frame: &mut Frame, app: &mut App) {
+    let popup_area = centered_rect(70, 75, frame.area());
+    frame.render_widget(Clear, popup_area);
+    let block = Block::bordered()
+        .title(format!(" Retained Messages ({}) ", app.retained_messages.len()))
+        .title_style(Style::default().fg(app.theme.accent).bold())
+        .border_style(Style::default().fg(app.theme.accent))
+        .style(Style::default().bg(app.theme.bg));
+    let inner = block.inner(popup_area);
+    frame.render_widget(block, popup_area);
+
+    if app.retained_messages.is_empty() {
+        let msg = if app.loading { "Scanning for retained messages..." } else { "No retained messages found" };
+        let p = Paragraph::new(Span::styled(msg, Style::default().fg(app.theme.muted)))
+            .style(Style::default().bg(app.theme.bg))
+            .alignment(ratatui::layout::Alignment::Center);
+        frame.render_widget(p, inner);
+        return;
+    }
+
+    // Split into list and footer
+    let chunks = ratatui::layout::Layout::vertical([
+        ratatui::layout::Constraint::Min(1),
+        ratatui::layout::Constraint::Length(1),
+    ]).split(inner);
+
+    let items: Vec<ListItem> = app.retained_messages.iter().enumerate().map(|(i, msg)| {
+        let selected = app.retained_list_state.selected() == Some(i);
+        let marker = if selected { "▸ " } else { "  " };
+        let preview = if msg.body.len() > 60 {
+            format!("{}...", &msg.body[..57])
+        } else {
+            msg.body.clone()
+        };
+        let line = format!("{}{} — {}", marker, msg.routing_key, preview);
+        let style = if selected {
+            Style::default().fg(app.theme.accent).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(app.theme.primary)
+        };
+        ListItem::new(Span::styled(line, style))
+    }).collect();
+
+    let list = List::new(items)
+        .style(Style::default().bg(app.theme.bg));
+    frame.render_widget(list, chunks[0]);
+
+    // Footer
+    let ks = Style::default().fg(app.theme.accent).add_modifier(Modifier::BOLD);
+    let ds = Style::default().fg(app.theme.muted);
+    let footer = Line::from(vec![
+        Span::styled("D", ks), Span::styled(":clear  ", ds),
+        Span::styled("c", ks), Span::styled(":copy  ", ds),
+        Span::styled("j/k", ks), Span::styled(":navigate  ", ds),
+        Span::styled("esc", ks), Span::styled(":close", ds),
+    ]);
+    frame.render_widget(
+        Paragraph::new(footer).style(Style::default().bg(app.theme.bg)),
+        chunks[1],
+    );
 }

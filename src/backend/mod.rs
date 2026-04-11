@@ -184,6 +184,16 @@ pub trait Backend: Send {
         Err("Message replay not supported by this backend".into())
     }
 
+    /// List retained messages (MQTT-specific, subscribe and collect retain=true)
+    fn list_retained_messages(&self, _namespace: &str) -> Result<Vec<MessageInfo>, String> {
+        Err("Retained message listing not supported by this backend".into())
+    }
+
+    /// Clear a retained message by publishing empty payload with retain=true
+    fn clear_retained_message(&self, _namespace: &str, _topic: &str) -> Result<(), String> {
+        Err("Clear retained not supported by this backend".into())
+    }
+
     /// Reset consumer group offsets for a queue/topic
     fn reset_consumer_group_offsets(
         &self,

@@ -533,6 +533,46 @@ pub fn handle_popup_key(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
                 app.popup = Popup::None;
             }
         }
+        Popup::RetainedMessages => {
+            let count = app.retained_messages.len();
+            match code {
+                KeyCode::Esc => {
+                    app.popup = Popup::None;
+                    app.retained_messages.clear();
+                }
+                KeyCode::Char('j') | KeyCode::Down => {
+                    if count > 0 {
+                        let i = app.retained_list_state.selected().unwrap_or(0);
+                        if i + 1 < count { app.retained_list_state.select(Some(i + 1)); }
+                    }
+                }
+                KeyCode::Char('k') | KeyCode::Up => {
+                    let i = app.retained_list_state.selected().unwrap_or(0);
+                    if i > 0 { app.retained_list_state.select(Some(i - 1)); }
+                }
+                KeyCode::Char('D') => {
+                    // Clear retained message
+                    if let Some(sel) = app.retained_list_state.selected() {
+                        if sel < count {
+                            let topic = app.retained_messages[sel].routing_key.clone();
+                            app.clear_retained_message(&topic);
+                        }
+                    }
+                }
+                KeyCode::Char('c') => {
+                    // Copy body to clipboard
+                    if let Some(sel) = app.retained_list_state.selected() {
+                        if let Some(msg) = app.retained_messages.get(sel) {
+                            match utils::copy_to_clipboard(&msg.body) {
+                                Ok(()) => app.set_status("Retained message body copied", false),
+                                Err(e) => app.set_status(e, true),
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
         Popup::BackendTypePicker => {
             let types = app::BACKEND_TYPES;
             match code {

@@ -173,6 +173,19 @@ pub fn handle_queue_list_key(app: &mut App, code: KeyCode, modifiers: KeyModifie
                 app.popup = Popup::BenchmarkConfig;
             }
         }
+        KeyCode::Char('H') => {
+            // Retained messages (MQTT only)
+            if let Some(ref backend) = app.backend {
+                if backend.backend_type() == "mqtt" {
+                    app.retained_messages.clear();
+                    app.popup = Popup::RetainedMessages;
+                    app.loading = true;
+                    app.load_retained_messages();
+                } else {
+                    app.set_status("Retained messages are only available for MQTT", true);
+                }
+            }
+        }
         _ => {}
     }
 }

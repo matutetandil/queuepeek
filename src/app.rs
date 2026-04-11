@@ -38,6 +38,8 @@ pub enum BgResult {
     Topology(Result<(Vec<crate::backend::ExchangeInfo>, Vec<crate::backend::BindingInfo>), String>),
     BenchmarkProgress { completed: u32, total: u32, latency_ms: u64 },
     BenchmarkComplete(BenchmarkStats),
+    RetainedMessages(Result<Vec<MessageInfo>, String>),
+    RetainedCleared(Result<String, String>),
     CompareMessages {
         queue_a: String,
         queue_b: String,
@@ -92,6 +94,7 @@ pub enum Popup {
     TopologyView,
     BenchmarkConfig,
     BenchmarkRunning,
+    RetainedMessages,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -326,6 +329,10 @@ pub struct App {
     pub scheduled_messages: Vec<ScheduledMessage>,
     pub scheduled_next_id: u64,
     pub scheduled_list_state: ListState,
+
+    // Retained messages (MQTT)
+    pub retained_messages: Vec<MessageInfo>,
+    pub retained_list_state: ListState,
 
     // Auto-update
     pub update_checker: UpdateChecker,
@@ -666,6 +673,8 @@ impl App {
             scheduled_messages: Vec::new(),
             scheduled_next_id: 1,
             scheduled_list_state: ListState::default(),
+            retained_messages: Vec::new(),
+            retained_list_state: ListState::default(),
             update_checker: UpdateChecker::new(),
         };
 
@@ -1685,6 +1694,32 @@ impl App {
         }
     }
 
+    pub fn load_retained_messages(&self) {
+        if let Some(ref backend) = self.backend {
+            let backend = backend.clone_backend();
+            let namespace = self.selected_namespace.clone();
+            let tx = self.bg_sender.clone();
+            std::thread::spawn(move || {
+                let result = backend.list_retained_messages(&namespace);
+                let _ = tx.send(BgResult::RetainedMessages(result));
+            });
+        }
+    }
+
+    pub fn clear_retained_message(&self, topic: &str) {
+        if let Some(ref backend) = self.backend {
+            let backend = backend.clone_backend();
+            let namespace = self.selected_namespace.clone();
+            let topic = topic.to_string();
+            let tx = self.bg_sender.clone();
+            std::thread::spawn(move || {
+                let result = backend.clear_retained_message(&namespace, &topic);
+                let msg = result.map(|_| format!("Cleared retained message on '{}'", topic));
+                let _ = tx.send(BgResult::RetainedCleared(msg));
+            });
+        }
+    }
+
     pub fn load_queue_detail(&self, queue: &str) {
         if let Some(ref backend) = self.backend {
             let backend = backend.clone_backend();
@@ -2018,6 +2053,30 @@ impl App {
                     self.popup = Popup::None;
                     self.loading = false;
                     self.set_status(format!("Queue detail: {}", e), true);
+                }
+                BgResult::RetainedMessages(Ok(msgs)) => {
+                    self.loading = false;
+                    if msgs.is_empty() {
+                        self.popup = Popup::None;
+                        self.set_status("No retained messages found", false);
+                    } else {
+                        self.set_status(format!("{} retained message(s) found", msgs.len()), false);
+                        self.retained_messages = msgs;
+                        self.retained_list_state.select(Some(0));
+                    }
+                }
+                BgResult::RetainedMessages(Err(e)) => {
+                    self.loading = false;
+                    self.popup = Popup::None;
+                    self.set_status(format!("Retained messages: {}", e), true);
+                }
+                BgResult::RetainedCleared(Ok(msg)) => {
+                    self.set_status(msg, false);
+                    // Refresh the list
+                    self.load_retained_messages();
+                }
+                BgResult::RetainedCleared(Err(e)) => {
+                    self.set_status(format!("Clear retained: {}", e), true);
                 }
             }
         }

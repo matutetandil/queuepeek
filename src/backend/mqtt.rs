@@ -305,6 +305,103 @@ impl Backend for MqttBackend {
         Ok(())
     }
 
+    fn list_retained_messages(&self, _namespace: &str) -> Result<Vec<MessageInfo>, String> {
+        let client_id = format!("queuepeek-retained-{}", uuid::Uuid::new_v4());
+        let opts = self.make_options(&client_id)?;
+        let (client, mut connection) = Client::new(opts, 256);
+
+        let subscribe_topics: Vec<String> = match &self.topics {
+            Some(t) => t.clone(),
+            None => vec!["#".to_string()],
+        };
+
+        let mut messages = Vec::new();
+        let deadline = Instant::now() + Duration::from_secs(3);
+        let mut connected = false;
+
+        for notification in connection.iter() {
+            if Instant::now() > deadline { break; }
+
+            match notification {
+                Ok(Event::Incoming(Packet::ConnAck(_))) => {
+                    connected = true;
+                    for topic in &subscribe_topics {
+                        let _ = client.subscribe(topic.as_str(), QoS::AtMostOnce);
+                    }
+                }
+                Ok(Event::Incoming(Packet::Publish(msg))) => {
+                    if msg.topic.starts_with("$SYS") { continue; }
+                    if !msg.retain { continue; }
+
+                    let body = String::from_utf8_lossy(&msg.payload).to_string();
+                    let mut headers = Vec::new();
+                    headers.push(("topic".to_string(), msg.topic.clone()));
+                    headers.push(("qos".to_string(), format!("{:?}", msg.qos)));
+                    headers.push(("retain".to_string(), "true".to_string()));
+                    headers.push(("payload_size".to_string(), format!("{} bytes", msg.payload.len())));
+
+                    messages.push(MessageInfo {
+                        index: messages.len() + 1,
+                        routing_key: msg.topic.clone(),
+                        exchange: String::new(),
+                        redelivered: false,
+                        timestamp: None,
+                        content_type: String::new(),
+                        headers,
+                        body,
+                    });
+                }
+                Err(e) => {
+                    if !connected {
+                        return Err(format!("MQTT connection failed: {}", e));
+                    }
+                    break;
+                }
+                _ => {}
+            }
+        }
+
+        let _ = client.disconnect();
+        messages.sort_by(|a, b| a.routing_key.cmp(&b.routing_key));
+        Ok(messages)
+    }
+
+    fn clear_retained_message(&self, _namespace: &str, topic: &str) -> Result<(), String> {
+        let client_id = format!("queuepeek-clear-retained-{}", uuid::Uuid::new_v4());
+        let opts = self.make_options(&client_id)?;
+        let (client, mut connection) = Client::new(opts, 10);
+
+        let topic = topic.to_string();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let mut connected = false;
+
+        for notification in connection.iter() {
+            if Instant::now() > deadline { break; }
+            match notification {
+                Ok(Event::Incoming(Packet::ConnAck(_))) => {
+                    connected = true;
+                    // Publish empty payload with retain=true to clear the retained message
+                    client.publish(&topic, QoS::AtLeastOnce, true, Vec::new())
+                        .map_err(|e| format!("Publishing clear: {}", e))?;
+                }
+                Ok(Event::Incoming(Packet::PubAck(_))) => {
+                    let _ = client.disconnect();
+                    return Ok(());
+                }
+                Err(e) => {
+                    if !connected {
+                        return Err(format!("MQTT connection failed: {}", e));
+                    }
+                    break;
+                }
+                _ => {}
+            }
+        }
+
+        let _ = client.disconnect();
+        if connected { Ok(()) } else { Err("Failed to connect".into()) }
+    }
+
     fn queue_detail(&self, _namespace: &str, queue: &str) -> Result<Vec<DetailSection>, String> {
         let mut sections = Vec::new();
 
