@@ -1,7 +1,7 @@
 use ratatui::prelude::*;
 use ratatui::widgets::*;
 
-use crate::app::{App, Popup, PublishForm, QueueOperation};
+use crate::app::{App, Popup, QueueOperation};
 use crate::backend::OffsetResetStrategy;
 
 pub fn draw(frame: &mut Frame, app: &mut App) {
