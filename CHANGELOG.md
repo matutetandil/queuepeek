@@ -37,12 +37,18 @@
   - Alert log visible in a popup; entries show timestamp, matched pattern, and message preview
   - Alert configuration is persisted in `config.toml`
   - New dependency: `regex = "1"`
-- Schema Registry / Avro decode (`s` key toggle in message detail)
+- Schema Registry / Avro / Protobuf decode (`s` key toggle in message detail)
   - Confluent Schema Registry integration; URL configured per profile via `schema_registry` field
   - Auto-decodes Avro messages using the Confluent wire format (magic byte `0x00` + 4-byte schema ID + Avro payload)
-  - Decoded Avro record is rendered as pretty-printed JSON
+  - Protobuf raw wire format decode (like `protoc --decode_raw`) — shows field numbers with values, handles nested messages, repeated fields, and all wire types
+  - Handles Confluent Protobuf wire format (varint message index array after schema ID)
+  - JSON Schema pass-through with pretty-printing
+  - Decoded records rendered as pretty-printed JSON
   - Falls back gracefully if the Schema Registry is unreachable or the schema ID is unknown
   - New dependency: `apache-avro = "0.17"`
+- Kafka security and permission info viewer (`A` key)
+  - Shows connection security context (protocol, SASL mechanism, authenticated user)
+  - Displays broker-level security configs (authorizer, ACL settings, super.users) via describe_configs
 
 ---
 
