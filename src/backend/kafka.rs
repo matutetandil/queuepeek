@@ -9,7 +9,7 @@ use rdkafka::message::{Headers, Message};
 use rdkafka::TopicPartitionList;
 use rdkafka::Offset;
 
-use super::{Backend, BrokerInfo, ConsumerGroupInfo, ConsumerGroupPartition, DetailEntry, DetailSection, MessageInfo, OffsetResetStrategy, QueueInfo};
+use super::{Backend, BrokerInfo, ConsumerGroupInfo, ConsumerGroupPartition, DetailEntry, DetailSection, MessageInfo, OffsetResetStrategy, PermissionEntry, QueueInfo};
 use crate::config::Profile;
 
 pub struct KafkaBackend {
@@ -804,6 +804,92 @@ impl Backend for KafkaBackend {
         };
 
         Ok(format!("Reset offsets for group '{}' on '{}' to {}", group, queue, strategy_name))
+    }
+
+    fn list_permissions(&self, _namespace: &str) -> Result<Vec<PermissionEntry>, String> {
+        let mut entries = Vec::new();
+
+        // Show connection security info as permission context
+        let protocol = if !self.username.is_empty() {
+            if self.tls { "SASL_SSL" } else { "SASL_PLAINTEXT" }
+        } else if self.tls {
+            "SSL"
+        } else {
+            "PLAINTEXT"
+        };
+
+        entries.push(PermissionEntry {
+            user_or_principal: if self.username.is_empty() { "anonymous".to_string() } else { self.username.clone() },
+            resource_type: "broker".to_string(),
+            resource_name: self.broker.clone(),
+            permission: protocol.to_string(),
+            operation: "connect".to_string(),
+            host: "*".to_string(),
+        });
+
+        if !self.username.is_empty() {
+            entries.push(PermissionEntry {
+                user_or_principal: self.username.clone(),
+                resource_type: "broker".to_string(),
+                resource_name: "SASL/PLAIN".to_string(),
+                permission: "authenticated".to_string(),
+                operation: "sasl".to_string(),
+                host: self.broker.clone(),
+            });
+        }
+
+        // Try to get broker configs for authorizer info
+        let admin = self.make_admin()?;
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .map_err(|e| format!("Creating runtime: {}", e))?;
+
+        use rdkafka::admin::{AdminOptions, ResourceSpecifier};
+        let configs = rt.block_on(async {
+            let opts = AdminOptions::new();
+            let resource = ResourceSpecifier::Broker(0);
+            admin.describe_configs(&[resource], &opts).await
+                .map_err(|e| format!("Describe configs: {}", e))
+        })?;
+
+        for result in &configs {
+            match result {
+                Ok(config) => {
+                    for entry in config.entries.iter() {
+                        let name = &entry.name;
+                        let value = entry.value.as_deref().unwrap_or("(null)");
+                        // Filter for security-related configs
+                        if name.contains("authorizer") || name.contains("acl")
+                            || name.contains("security") || name.contains("sasl")
+                            || name.contains("listener") || name.contains("ssl.client.auth")
+                            || name.contains("principal") || name.contains("super.users")
+                        {
+                            entries.push(PermissionEntry {
+                                user_or_principal: "(broker config)".to_string(),
+                                resource_type: "config".to_string(),
+                                resource_name: name.clone(),
+                                permission: value.to_string(),
+                                operation: "broker-setting".to_string(),
+                                host: self.broker.clone(),
+                            });
+                        }
+                    }
+                }
+                Err(e) => {
+                    entries.push(PermissionEntry {
+                        user_or_principal: "(error)".to_string(),
+                        resource_type: "broker".to_string(),
+                        resource_name: format!("Config error: {}", e),
+                        permission: "error".to_string(),
+                        operation: "describe_configs".to_string(),
+                        host: self.broker.clone(),
+                    });
+                }
+            }
+        }
+
+        Ok(entries)
     }
 
     fn clone_backend(&self) -> Box<dyn Backend> {
