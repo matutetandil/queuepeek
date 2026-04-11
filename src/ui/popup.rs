@@ -46,6 +46,9 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         Popup::BenchmarkRunning => draw_benchmark_running(frame, app),
         Popup::RetainedMessages => draw_retained_messages(frame, app),
         Popup::Permissions => draw_permissions(frame, app),
+        Popup::AlertConfig => draw_alert_config(frame, app),
+        Popup::AlertAdd => draw_alert_add(frame, app),
+        Popup::AlertLog => draw_alert_log(frame, app),
         Popup::ConfirmReroute { ref exchange, ref routing_key, count } => {
             let msg = format!(
                 "Re-route {} message(s) to:\n\n  Exchange:    {}\n  Routing Key: {}\n\nThis will publish to the original exchange.\nThe messages remain in the current queue.",
@@ -1707,5 +1710,147 @@ fn draw_permissions(frame: &mut Frame, app: &mut App) {
     frame.render_widget(
         Paragraph::new(footer).style(Style::default().bg(app.theme.bg)),
         chunks[2],
+    );
+}
+
+fn draw_alert_config(frame: &mut Frame, app: &mut App) {
+    let popup_area = centered_rect(60, 60, frame.area());
+    frame.render_widget(Clear, popup_area);
+    let block = Block::bordered()
+        .title(format!(" Webhook Alerts ({}) ", app.config.webhook_alerts.len()))
+        .title_style(Style::default().fg(app.theme.accent).bold())
+        .border_style(Style::default().fg(app.theme.accent))
+        .style(Style::default().bg(app.theme.bg));
+    let inner = block.inner(popup_area);
+    frame.render_widget(block, popup_area);
+
+    let chunks = ratatui::layout::Layout::vertical([
+        ratatui::layout::Constraint::Min(1),
+        ratatui::layout::Constraint::Length(1),
+    ]).split(inner);
+
+    if app.config.webhook_alerts.is_empty() {
+        let p = Paragraph::new(Span::styled("No alerts configured. Press 'a' to add one.", Style::default().fg(app.theme.muted)))
+            .style(Style::default().bg(app.theme.bg));
+        frame.render_widget(p, chunks[0]);
+    } else {
+        let items: Vec<ListItem> = app.config.webhook_alerts.iter().enumerate().map(|(i, alert)| {
+            let selected = app.alert_list_state.selected() == Some(i);
+            let marker = if selected { "▸ " } else { "  " };
+            let status = if alert.enabled { "●" } else { "○" };
+            let status_color = if alert.enabled { app.theme.success } else { app.theme.muted };
+            let line = Line::from(vec![
+                Span::styled(marker, Style::default().fg(app.theme.primary)),
+                Span::styled(format!("{} ", status), Style::default().fg(status_color)),
+                Span::styled(&alert.name, Style::default().fg(if selected { app.theme.accent } else { app.theme.primary })),
+                Span::styled(format!("  /{}/", alert.pattern), Style::default().fg(app.theme.muted)),
+            ]);
+            ListItem::new(line)
+        }).collect();
+        let list = List::new(items).style(Style::default().bg(app.theme.bg));
+        frame.render_widget(list, chunks[0]);
+    }
+
+    let ks = Style::default().fg(app.theme.accent).add_modifier(Modifier::BOLD);
+    let ds = Style::default().fg(app.theme.muted);
+    let footer = Line::from(vec![
+        Span::styled("a", ks), Span::styled(":add  ", ds),
+        Span::styled("enter", ks), Span::styled(":toggle  ", ds),
+        Span::styled("d", ks), Span::styled(":delete  ", ds),
+        Span::styled("L", ks), Span::styled(":log  ", ds),
+        Span::styled("esc", ks), Span::styled(":close", ds),
+    ]);
+    frame.render_widget(Paragraph::new(footer).style(Style::default().bg(app.theme.bg)), chunks[1]);
+}
+
+fn draw_alert_add(frame: &mut Frame, app: &mut App) {
+    let popup_area = centered_rect(50, 40, frame.area());
+    frame.render_widget(Clear, popup_area);
+    let block = Block::bordered()
+        .title(" Add Webhook Alert ")
+        .title_style(Style::default().fg(app.theme.accent).bold())
+        .border_style(Style::default().fg(app.theme.accent))
+        .style(Style::default().bg(app.theme.bg));
+    let inner = block.inner(popup_area);
+    frame.render_widget(block, popup_area);
+
+    let fields = [
+        ("Name", &app.alert_form_name),
+        ("Pattern (regex)", &app.alert_form_pattern),
+        ("Webhook URL", &app.alert_form_url),
+    ];
+
+    for (i, (label, value)) in fields.iter().enumerate() {
+        let y = inner.y + (i as u16) * 2;
+        let focused = app.alert_form_focused == i;
+        let label_style = if focused {
+            Style::default().fg(app.theme.accent).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(app.theme.muted)
+        };
+        let area = Rect::new(inner.x + 1, y, inner.width.saturating_sub(2), 1);
+        frame.render_widget(Paragraph::new(Span::styled(*label, label_style)).style(Style::default().bg(app.theme.bg)), area);
+
+        let val_area = Rect::new(inner.x + 1, y + 1, inner.width.saturating_sub(2), 1);
+        let cursor = if focused { "█" } else { "" };
+        let val_text = format!("{}{}", value, cursor);
+        frame.render_widget(
+            Paragraph::new(Span::styled(val_text, Style::default().fg(app.theme.primary)))
+                .style(Style::default().bg(app.theme.highlight_bg)),
+            val_area,
+        );
+    }
+
+    if !app.alert_form_error.is_empty() {
+        let err_area = Rect::new(inner.x + 1, inner.y + 7, inner.width.saturating_sub(2), 1);
+        frame.render_widget(
+            Paragraph::new(Span::styled(&app.alert_form_error, Style::default().fg(app.theme.error)))
+                .style(Style::default().bg(app.theme.bg)),
+            err_area,
+        );
+    }
+}
+
+fn draw_alert_log(frame: &mut Frame, app: &mut App) {
+    let popup_area = centered_rect(80, 70, frame.area());
+    frame.render_widget(Clear, popup_area);
+    let block = Block::bordered()
+        .title(format!(" Alert Log ({}) ", app.alert_log.len()))
+        .title_style(Style::default().fg(app.theme.accent).bold())
+        .border_style(Style::default().fg(app.theme.accent))
+        .style(Style::default().bg(app.theme.bg));
+    let inner = block.inner(popup_area);
+    frame.render_widget(block, popup_area);
+
+    if app.alert_log.is_empty() {
+        let p = Paragraph::new(Span::styled("No alerts fired yet.", Style::default().fg(app.theme.muted)))
+            .style(Style::default().bg(app.theme.bg));
+        frame.render_widget(p, inner);
+        return;
+    }
+
+    let scroll = app.alert_log_scroll as usize;
+    let visible = inner.height as usize;
+    let lines: Vec<Line> = app.alert_log.iter()
+        .skip(scroll)
+        .take(visible)
+        .map(|entry| {
+            let status_color = if entry.webhook_status.starts_with("2") {
+                app.theme.success
+            } else {
+                app.theme.error
+            };
+            Line::from(vec![
+                Span::styled(format!("[{}] ", entry.timestamp), Style::default().fg(app.theme.muted)),
+                Span::styled(format!("{} ", entry.alert_name), Style::default().fg(app.theme.accent)),
+                Span::styled(format!("on {} ", entry.queue), Style::default().fg(app.theme.primary)),
+                Span::styled(format!("→ {}", entry.webhook_status), Style::default().fg(status_color)),
+            ])
+        })
+        .collect();
+
+    frame.render_widget(
+        Paragraph::new(lines).style(Style::default().bg(app.theme.bg)),
+        inner,
     );
 }

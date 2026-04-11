@@ -61,6 +61,17 @@ pub struct MessageTemplate {
     pub body: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WebhookAlert {
+    pub name: String,
+    pub pattern: String,
+    pub webhook_url: String,
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub queues: Vec<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Config {
     #[serde(default)]
@@ -73,6 +84,8 @@ pub struct Config {
     pub filters: HashMap<String, Vec<SavedFilter>>,
     #[serde(default)]
     pub templates: Vec<MessageTemplate>,
+    #[serde(default)]
+    pub webhook_alerts: Vec<WebhookAlert>,
 }
 
 impl Config {

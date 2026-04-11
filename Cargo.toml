@@ -23,3 +23,4 @@ tokio = { version = "1", features = ["rt"] }
 base64 = "0.22"
 flate2 = "1"
 similar = "2"
+regex = "1"

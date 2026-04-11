@@ -533,6 +533,117 @@ pub fn handle_popup_key(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
                 app.popup = Popup::None;
             }
         }
+        Popup::AlertConfig => {
+            let count = app.config.webhook_alerts.len();
+            match code {
+                KeyCode::Esc => app.popup = Popup::None,
+                KeyCode::Char('j') | KeyCode::Down => {
+                    if count > 0 {
+                        let i = app.alert_list_state.selected().unwrap_or(0);
+                        if i + 1 < count { app.alert_list_state.select(Some(i + 1)); }
+                    }
+                }
+                KeyCode::Char('k') | KeyCode::Up => {
+                    let i = app.alert_list_state.selected().unwrap_or(0);
+                    if i > 0 { app.alert_list_state.select(Some(i - 1)); }
+                }
+                KeyCode::Char('a') => {
+                    // Add new alert
+                    app.alert_form_name.clear();
+                    app.alert_form_pattern.clear();
+                    app.alert_form_url.clear();
+                    app.alert_form_focused = 0;
+                    app.alert_form_error.clear();
+                    app.popup = Popup::AlertAdd;
+                }
+                KeyCode::Enter => {
+                    // Toggle enabled
+                    if let Some(sel) = app.alert_list_state.selected() {
+                        if sel < count {
+                            app.config.webhook_alerts[sel].enabled = !app.config.webhook_alerts[sel].enabled;
+                            let _ = app.config.save(app.config_path.as_deref());
+                        }
+                    }
+                }
+                KeyCode::Char('d') | KeyCode::Delete => {
+                    if let Some(sel) = app.alert_list_state.selected() {
+                        if sel < count {
+                            app.config.webhook_alerts.remove(sel);
+                            let _ = app.config.save(app.config_path.as_deref());
+                            let new_count = app.config.webhook_alerts.len();
+                            if new_count == 0 {
+                                app.alert_list_state.select(None);
+                            } else if sel >= new_count {
+                                app.alert_list_state.select(Some(new_count - 1));
+                            }
+                        }
+                    }
+                }
+                KeyCode::Char('L') => {
+                    app.alert_log_scroll = 0;
+                    app.popup = Popup::AlertLog;
+                }
+                _ => {}
+            }
+        }
+        Popup::AlertAdd => {
+            match code {
+                KeyCode::Esc => app.popup = Popup::AlertConfig,
+                KeyCode::Tab | KeyCode::Down => {
+                    app.alert_form_focused = (app.alert_form_focused + 1) % 3;
+                }
+                KeyCode::BackTab | KeyCode::Up => {
+                    app.alert_form_focused = (app.alert_form_focused + 2) % 3;
+                }
+                KeyCode::Char(c) => {
+                    match app.alert_form_focused {
+                        0 => app.alert_form_name.push(c),
+                        1 => app.alert_form_pattern.push(c),
+                        2 => app.alert_form_url.push(c),
+                        _ => {}
+                    }
+                }
+                KeyCode::Backspace => {
+                    match app.alert_form_focused {
+                        0 => { app.alert_form_name.pop(); }
+                        1 => { app.alert_form_pattern.pop(); }
+                        2 => { app.alert_form_url.pop(); }
+                        _ => {}
+                    }
+                }
+                KeyCode::Enter => {
+                    if app.alert_form_name.is_empty() {
+                        app.alert_form_error = "Name is required".into();
+                    } else if app.alert_form_pattern.is_empty() {
+                        app.alert_form_error = "Pattern is required".into();
+                    } else if regex::Regex::new(&app.alert_form_pattern).is_err() {
+                        app.alert_form_error = "Invalid regex pattern".into();
+                    } else if app.alert_form_url.is_empty() {
+                        app.alert_form_error = "Webhook URL is required".into();
+                    } else {
+                        let alert = crate::config::WebhookAlert {
+                            name: app.alert_form_name.clone(),
+                            pattern: app.alert_form_pattern.clone(),
+                            webhook_url: app.alert_form_url.clone(),
+                            enabled: true,
+                            queues: Vec::new(),
+                        };
+                        app.config.webhook_alerts.push(alert);
+                        let _ = app.config.save(app.config_path.as_deref());
+                        app.popup = Popup::AlertConfig;
+                        app.alert_list_state.select(Some(app.config.webhook_alerts.len() - 1));
+                        app.set_status(format!("Alert '{}' created", app.alert_form_name), false);
+                    }
+                }
+                _ => {}
+            }
+        }
+        Popup::AlertLog => {
+            match code {
+                KeyCode::Esc => app.popup = Popup::AlertConfig,
+                _ => handle_scroll_keys(code, &mut app.alert_log_scroll),
+            }
+        }
         Popup::Permissions => {
             match code {
                 KeyCode::Esc => {

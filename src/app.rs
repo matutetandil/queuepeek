@@ -41,6 +41,7 @@ pub enum BgResult {
     RetainedMessages(Result<Vec<MessageInfo>, String>),
     RetainedCleared(Result<String, String>),
     Permissions(Result<Vec<crate::backend::PermissionEntry>, String>),
+    AlertMatch { alert_name: String, queue: String, message_preview: String, webhook_status: String },
     CompareMessages {
         queue_a: String,
         queue_b: String,
@@ -97,6 +98,9 @@ pub enum Popup {
     BenchmarkRunning,
     RetainedMessages,
     Permissions,
+    AlertConfig,
+    AlertAdd,
+    AlertLog,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -115,6 +119,14 @@ pub const SCHEDULE_PRESETS: &[(u64, &str)] = &[
     (1800, "30 minutes"),
     (3600, "1 hour"),
 ];
+
+pub struct AlertLogEntry {
+    pub timestamp: String,
+    pub alert_name: String,
+    pub queue: String,
+    pub matched_preview: String,
+    pub webhook_status: String,
+}
 
 // QueueComparisonResult and ComparisonTab re-exported via pub use at top of file
 
@@ -339,6 +351,18 @@ pub struct App {
     // Permissions/ACL
     pub permissions: Vec<crate::backend::PermissionEntry>,
     pub permissions_scroll: u16,
+
+    // Webhook alerts
+    pub alert_log: VecDeque<AlertLogEntry>,
+    pub alert_log_scroll: u16,
+    pub alert_list_state: ListState,
+    pub alert_form_name: String,
+    pub alert_form_pattern: String,
+    pub alert_form_url: String,
+    pub alert_form_focused: usize,
+    pub alert_form_error: String,
+    pub alert_last_check: Instant,
+    pub alert_seen_hashes: HashSet<u64>,
 
     // Auto-update
     pub update_checker: UpdateChecker,
@@ -683,6 +707,16 @@ impl App {
             retained_list_state: ListState::default(),
             permissions: Vec::new(),
             permissions_scroll: 0,
+            alert_log: VecDeque::with_capacity(100),
+            alert_log_scroll: 0,
+            alert_list_state: ListState::default(),
+            alert_form_name: String::new(),
+            alert_form_pattern: String::new(),
+            alert_form_url: String::new(),
+            alert_form_focused: 0,
+            alert_form_error: String::new(),
+            alert_last_check: Instant::now(),
+            alert_seen_hashes: HashSet::new(),
             update_checker: UpdateChecker::new(),
         };
 
@@ -1702,6 +1736,80 @@ impl App {
         }
     }
 
+    pub fn check_alerts(&mut self) {
+        // Only check every 30 seconds, and only if we have a backend and enabled alerts
+        if self.alert_last_check.elapsed() < Duration::from_secs(30) { return; }
+        self.alert_last_check = Instant::now();
+
+        let backend = match &self.backend {
+            Some(b) => b.clone_backend(),
+            None => return,
+        };
+
+        let enabled_alerts: Vec<crate::config::WebhookAlert> = self.config.webhook_alerts.iter()
+            .filter(|a| a.enabled)
+            .cloned()
+            .collect();
+
+        if enabled_alerts.is_empty() { return; }
+
+        let namespace = self.selected_namespace.clone();
+        let tx = self.bg_sender.clone();
+        let queue_name = self.current_queue_name.clone();
+        let seen_hashes = self.alert_seen_hashes.clone();
+
+        std::thread::spawn(move || {
+            // Peek current messages (use a small batch)
+            let messages = match backend.peek_messages(&namespace, &queue_name, 50) {
+                Ok(m) => m,
+                Err(_) => return,
+            };
+
+            for alert in &enabled_alerts {
+                // Check if queue filter applies
+                if !alert.queues.is_empty() && !alert.queues.contains(&queue_name) {
+                    continue;
+                }
+
+                let re = match regex::Regex::new(&alert.pattern) {
+                    Ok(r) => r,
+                    Err(_) => continue,
+                };
+
+                for msg in &messages {
+                    // Deduplicate by hashing body
+                    use std::hash::{Hash, Hasher};
+                    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+                    msg.body.hash(&mut hasher);
+                    alert.name.hash(&mut hasher);
+                    let hash = hasher.finish();
+
+                    if seen_hashes.contains(&hash) { continue; }
+
+                    if re.is_match(&msg.body) {
+                        let preview = if msg.body.len() > 100 {
+                            format!("{}...", &msg.body[..97])
+                        } else {
+                            msg.body.clone()
+                        };
+
+                        // Fire webhook
+                        let webhook_status = fire_webhook(&alert.webhook_url, &alert.name, &queue_name, &preview);
+
+                        let _ = tx.send(BgResult::AlertMatch {
+                            alert_name: alert.name.clone(),
+                            queue: queue_name.clone(),
+                            message_preview: preview,
+                            webhook_status,
+                        });
+
+                        break; // One match per alert per check cycle
+                    }
+                }
+            }
+        });
+    }
+
     pub fn load_permissions(&self) {
         if let Some(ref backend) = self.backend {
             let backend = backend.clone_backend();
@@ -2114,6 +2222,27 @@ impl App {
                     self.popup = Popup::None;
                     self.set_status(format!("Permissions: {}", e), true);
                 }
+                BgResult::AlertMatch { alert_name, queue, message_preview, webhook_status } => {
+                    // Record seen hash
+                    use std::hash::{Hash, Hasher};
+                    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+                    message_preview.hash(&mut hasher);
+                    alert_name.hash(&mut hasher);
+                    self.alert_seen_hashes.insert(hasher.finish());
+
+                    let ts = chrono_timestamp();
+                    self.alert_log.push_front(AlertLogEntry {
+                        timestamp: ts,
+                        alert_name: alert_name.clone(),
+                        queue,
+                        matched_preview: message_preview,
+                        webhook_status: webhook_status.clone(),
+                    });
+                    if self.alert_log.len() > 100 {
+                        self.alert_log.pop_back();
+                    }
+                    self.set_status(format!("Alert '{}' fired — {}", alert_name, webhook_status), false);
+                }
             }
         }
     }
@@ -2167,3 +2296,25 @@ impl App {
 
 // Re-exported from operations module
 pub use crate::operations::parse_x_death_value;
+
+fn fire_webhook(url: &str, alert_name: &str, queue: &str, preview: &str) -> String {
+    let client = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(5))
+        .build();
+    let client = match client {
+        Ok(c) => c,
+        Err(e) => return format!("Client error: {}", e),
+    };
+
+    let payload = serde_json::json!({
+        "alert": alert_name,
+        "queue": queue,
+        "matched_preview": preview,
+        "timestamp": chrono_timestamp(),
+    });
+
+    match client.post(url).json(&payload).send() {
+        Ok(resp) => format!("{}", resp.status()),
+        Err(e) => format!("Webhook error: {}", e),
+    }
+}

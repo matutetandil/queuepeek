@@ -173,6 +173,13 @@ pub fn handle_queue_list_key(app: &mut App, code: KeyCode, modifiers: KeyModifie
                 app.popup = Popup::BenchmarkConfig;
             }
         }
+        KeyCode::Char('W') => {
+            // Webhook alert config
+            if !app.config.webhook_alerts.is_empty() {
+                app.alert_list_state.select(Some(0));
+            }
+            app.popup = Popup::AlertConfig;
+        }
         KeyCode::Char('A') => {
             // ACL/Permission viewer
             app.permissions.clear();

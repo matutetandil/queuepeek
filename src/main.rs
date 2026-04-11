@@ -57,6 +57,7 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App)
     loop {
         app.process_bg_results();
         app.check_scheduled_messages();
+        app.check_alerts();
         app.update_checker.poll();
 
         // Periodic update check
