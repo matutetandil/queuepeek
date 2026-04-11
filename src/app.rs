@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::mpsc;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use ratatui::widgets::ListState;
 
@@ -168,6 +168,18 @@ pub struct ScheduledMessage {
     pub scheduled_at: Instant,
     pub publish_at: Instant,
     pub delay_secs: u64,
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+struct PersistedScheduledMessage {
+    id: u64,
+    namespace: String,
+    queue: String,
+    routing_key: String,
+    content_type: String,
+    body: String,
+    publish_epoch_secs: u64,
+    delay_secs: u64,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -568,7 +580,7 @@ impl App {
             profile_list_state.select(Some(0));
         }
 
-        Self {
+        let mut app = Self {
             config,
             config_path,
             screen: Screen::ProfileSelect,
@@ -651,7 +663,10 @@ impl App {
             scheduled_next_id: 1,
             scheduled_list_state: ListState::default(),
             update_checker: UpdateChecker::new(),
-        }
+        };
+
+        app.load_scheduled_messages();
+        app
     }
 
     pub fn set_status(&mut self, msg: impl Into<String>, is_error: bool) {
@@ -1451,6 +1466,7 @@ impl App {
         };
         self.scheduled_next_id += 1;
         self.scheduled_messages.push(msg);
+        self.save_scheduled_messages();
     }
 
     pub fn check_scheduled_messages(&mut self) {
@@ -1467,6 +1483,10 @@ impl App {
             }
         });
 
+        if !to_publish.is_empty() {
+            self.save_scheduled_messages();
+        }
+
         for (id, namespace, queue, routing_key, content_type, body) in to_publish {
             if let Some(ref backend) = self.backend {
                 let backend = backend.clone_backend();
@@ -1481,6 +1501,101 @@ impl App {
 
     pub fn cancel_scheduled_message(&mut self, id: u64) {
         self.scheduled_messages.retain(|m| m.id != id);
+        self.save_scheduled_messages();
+    }
+
+    fn scheduled_messages_path() -> Option<std::path::PathBuf> {
+        dirs::config_dir().map(|d| d.join("queuepeek").join("scheduled.json"))
+    }
+
+    pub fn save_scheduled_messages(&self) {
+        let path = match Self::scheduled_messages_path() {
+            Some(p) => p,
+            None => return,
+        };
+
+        let now_epoch = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        let now_instant = Instant::now();
+
+        let persisted: Vec<PersistedScheduledMessage> = self.scheduled_messages.iter().map(|m| {
+            // Convert Instant to epoch: compute the remaining seconds and add to current epoch
+            let remaining = m.publish_at.saturating_duration_since(now_instant);
+            PersistedScheduledMessage {
+                id: m.id,
+                namespace: m.namespace.clone(),
+                queue: m.queue.clone(),
+                routing_key: m.routing_key.clone(),
+                content_type: m.content_type.clone(),
+                body: m.body.clone(),
+                publish_epoch_secs: now_epoch + remaining.as_secs(),
+                delay_secs: m.delay_secs,
+            }
+        }).collect();
+
+        if let Ok(json) = serde_json::to_string_pretty(&persisted) {
+            if let Some(parent) = path.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            let _ = std::fs::write(&path, json);
+        }
+    }
+
+    pub fn load_scheduled_messages(&mut self) {
+        let path = match Self::scheduled_messages_path() {
+            Some(p) => p,
+            None => return,
+        };
+
+        let content = match std::fs::read_to_string(&path) {
+            Ok(c) => c,
+            Err(_) => return,
+        };
+
+        let persisted: Vec<PersistedScheduledMessage> = match serde_json::from_str(&content) {
+            Ok(v) => v,
+            Err(_) => return,
+        };
+
+        let now_epoch = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        let now_instant = Instant::now();
+
+        for p in persisted {
+            let publish_at = if p.publish_epoch_secs > now_epoch {
+                now_instant + Duration::from_secs(p.publish_epoch_secs - now_epoch)
+            } else {
+                // Already past due — will fire on next check_scheduled_messages tick
+                now_instant
+            };
+
+            self.scheduled_messages.push(ScheduledMessage {
+                id: p.id,
+                namespace: p.namespace,
+                queue: p.queue,
+                routing_key: p.routing_key,
+                content_type: p.content_type,
+                body: p.body,
+                scheduled_at: now_instant,
+                publish_at,
+                delay_secs: p.delay_secs,
+            });
+
+            if p.id >= self.scheduled_next_id {
+                self.scheduled_next_id = p.id + 1;
+            }
+        }
+
+        if !self.scheduled_messages.is_empty() {
+            self.set_status(
+                format!("Loaded {} scheduled message(s) from disk", self.scheduled_messages.len()),
+                false,
+            );
+        }
     }
 
     pub fn do_reset_offsets(&self) {
