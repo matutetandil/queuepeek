@@ -533,6 +533,15 @@ pub fn handle_popup_key(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
                 app.popup = Popup::None;
             }
         }
+        Popup::Permissions => {
+            match code {
+                KeyCode::Esc => {
+                    app.popup = Popup::None;
+                    app.permissions.clear();
+                }
+                _ => handle_scroll_keys(code, &mut app.permissions_scroll),
+            }
+        }
         Popup::RetainedMessages => {
             let count = app.retained_messages.len();
             match code {

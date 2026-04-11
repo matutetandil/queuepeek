@@ -40,6 +40,7 @@ pub enum BgResult {
     BenchmarkComplete(BenchmarkStats),
     RetainedMessages(Result<Vec<MessageInfo>, String>),
     RetainedCleared(Result<String, String>),
+    Permissions(Result<Vec<crate::backend::PermissionEntry>, String>),
     CompareMessages {
         queue_a: String,
         queue_b: String,
@@ -95,6 +96,7 @@ pub enum Popup {
     BenchmarkConfig,
     BenchmarkRunning,
     RetainedMessages,
+    Permissions,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -333,6 +335,10 @@ pub struct App {
     // Retained messages (MQTT)
     pub retained_messages: Vec<MessageInfo>,
     pub retained_list_state: ListState,
+
+    // Permissions/ACL
+    pub permissions: Vec<crate::backend::PermissionEntry>,
+    pub permissions_scroll: u16,
 
     // Auto-update
     pub update_checker: UpdateChecker,
@@ -675,6 +681,8 @@ impl App {
             scheduled_list_state: ListState::default(),
             retained_messages: Vec::new(),
             retained_list_state: ListState::default(),
+            permissions: Vec::new(),
+            permissions_scroll: 0,
             update_checker: UpdateChecker::new(),
         };
 
@@ -1694,6 +1702,18 @@ impl App {
         }
     }
 
+    pub fn load_permissions(&self) {
+        if let Some(ref backend) = self.backend {
+            let backend = backend.clone_backend();
+            let namespace = self.selected_namespace.clone();
+            let tx = self.bg_sender.clone();
+            std::thread::spawn(move || {
+                let result = backend.list_permissions(&namespace);
+                let _ = tx.send(BgResult::Permissions(result));
+            });
+        }
+    }
+
     pub fn load_retained_messages(&self) {
         if let Some(ref backend) = self.backend {
             let backend = backend.clone_backend();
@@ -2077,6 +2097,22 @@ impl App {
                 }
                 BgResult::RetainedCleared(Err(e)) => {
                     self.set_status(format!("Clear retained: {}", e), true);
+                }
+                BgResult::Permissions(Ok(perms)) => {
+                    self.loading = false;
+                    if perms.is_empty() {
+                        self.popup = Popup::None;
+                        self.set_status("No permissions found", false);
+                    } else {
+                        self.set_status(format!("{} permission(s) loaded", perms.len()), false);
+                        self.permissions = perms;
+                        self.permissions_scroll = 0;
+                    }
+                }
+                BgResult::Permissions(Err(e)) => {
+                    self.loading = false;
+                    self.popup = Popup::None;
+                    self.set_status(format!("Permissions: {}", e), true);
                 }
             }
         }

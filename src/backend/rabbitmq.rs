@@ -3,7 +3,7 @@ use serde::Deserialize;
 use std::sync::Arc;
 use std::time::Duration;
 
-use super::{Backend, BindingInfo, BrokerInfo, DetailEntry, DetailSection, ExchangeInfo, MessageInfo, QueueInfo};
+use super::{Backend, BindingInfo, BrokerInfo, DetailEntry, DetailSection, ExchangeInfo, MessageInfo, PermissionEntry, QueueInfo};
 use crate::config::Profile;
 
 // API response structs (same as current rabbit.rs)
@@ -556,6 +556,57 @@ impl Backend for RabbitMqBackend {
             }
         }).filter(|b| !b.source.is_empty()) // skip default exchange bindings
         .collect())
+    }
+
+    fn list_permissions(&self, namespace: &str) -> Result<Vec<PermissionEntry>, String> {
+        let vhost = urlencoding::encode(namespace);
+        let url = format!("{}/api/permissions/{}", self.base_url, vhost);
+        let resp: Vec<serde_json::Value> = self.client.get(&url)
+            .basic_auth(&self.username, Some(&self.password))
+            .timeout(Duration::from_secs(10))
+            .send().map_err(|e| format!("HTTP: {}", e))?
+            .json().map_err(|e| format!("JSON: {}", e))?;
+
+        let mut entries = Vec::new();
+        for p in &resp {
+            let user = p["user"].as_str().unwrap_or("").to_string();
+            let configure = p["configure"].as_str().unwrap_or("").to_string();
+            let write = p["write"].as_str().unwrap_or("").to_string();
+            let read = p["read"].as_str().unwrap_or("").to_string();
+
+            if !configure.is_empty() {
+                entries.push(PermissionEntry {
+                    user_or_principal: user.clone(),
+                    resource_type: "vhost".to_string(),
+                    resource_name: configure.clone(),
+                    permission: "configure".to_string(),
+                    operation: "configure".to_string(),
+                    host: namespace.to_string(),
+                });
+            }
+            if !write.is_empty() {
+                entries.push(PermissionEntry {
+                    user_or_principal: user.clone(),
+                    resource_type: "vhost".to_string(),
+                    resource_name: write.clone(),
+                    permission: "write".to_string(),
+                    operation: "write".to_string(),
+                    host: namespace.to_string(),
+                });
+            }
+            if !read.is_empty() {
+                entries.push(PermissionEntry {
+                    user_or_principal: user.clone(),
+                    resource_type: "vhost".to_string(),
+                    resource_name: read.clone(),
+                    permission: "read".to_string(),
+                    operation: "read".to_string(),
+                    host: namespace.to_string(),
+                });
+            }
+        }
+
+        Ok(entries)
     }
 
     fn clone_backend(&self) -> Box<dyn Backend> {

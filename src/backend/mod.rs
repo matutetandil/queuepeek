@@ -102,6 +102,17 @@ pub struct BindingInfo {
     pub destination_type: String,
 }
 
+/// Permission/ACL entry for a user or principal
+#[derive(Debug, Clone)]
+pub struct PermissionEntry {
+    pub user_or_principal: String,
+    pub resource_type: String,
+    pub resource_name: String,
+    pub permission: String,
+    pub operation: String,
+    pub host: String,
+}
+
 /// Generic backend trait — implement for each broker type
 pub trait Backend: Send {
     fn backend_type(&self) -> &str;
@@ -182,6 +193,11 @@ pub trait Backend: Send {
         _dest_topic: &str,
     ) -> Result<u64, String> {
         Err("Message replay not supported by this backend".into())
+    }
+
+    /// List permissions/ACLs for the current namespace
+    fn list_permissions(&self, _namespace: &str) -> Result<Vec<PermissionEntry>, String> {
+        Err("Permission listing not supported by this backend".into())
     }
 
     /// List retained messages (MQTT-specific, subscribe and collect retain=true)

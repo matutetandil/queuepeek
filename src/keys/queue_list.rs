@@ -173,6 +173,14 @@ pub fn handle_queue_list_key(app: &mut App, code: KeyCode, modifiers: KeyModifie
                 app.popup = Popup::BenchmarkConfig;
             }
         }
+        KeyCode::Char('A') => {
+            // ACL/Permission viewer
+            app.permissions.clear();
+            app.permissions_scroll = 0;
+            app.popup = Popup::Permissions;
+            app.loading = true;
+            app.load_permissions();
+        }
         KeyCode::Char('H') => {
             // Retained messages (MQTT only)
             if let Some(ref backend) = app.backend {
