@@ -1550,12 +1550,19 @@ fn draw_benchmark_running(frame: &mut Frame, app: &App) {
     let gauge_area = Rect::new(inner.x + 2, inner.y + 1, inner.width.saturating_sub(4), 1);
     frame.render_widget(gauge, gauge_area);
 
-    let status_line = if let Some(ref stats) = app.bench_stats {
+    if let Some(ref stats) = app.bench_stats {
         let mps = if stats.elapsed_ms > 0 { stats.total as f64 / (stats.elapsed_ms as f64 / 1000.0) } else { 0.0 };
-        format!("  Done: {:.0} msg/s, avg {}ms, {} errors", mps, stats.avg_latency_ms, stats.errors)
+        let line1 = format!("  Done: {:.0} msg/s, {} threads, {} errors", mps, stats.concurrency, stats.errors);
+        let line2 = format!("  Latency: avg {}ms, p50 {}ms, p95 {}ms, p99 {}ms",
+            stats.avg_latency_ms, stats.p50_latency_ms, stats.p95_latency_ms, stats.p99_latency_ms);
+        let s = Style::default().fg(app.theme.primary);
+        let area1 = Rect::new(inner.x, inner.y + 3, inner.width, 1);
+        let area2 = Rect::new(inner.x, inner.y + 4, inner.width, 1);
+        frame.render_widget(Paragraph::new(Span::styled(line1, s)).style(Style::default().bg(app.theme.bg)), area1);
+        frame.render_widget(Paragraph::new(Span::styled(line2, s)).style(Style::default().bg(app.theme.bg)), area2);
     } else {
-        "  Publishing... (esc to cancel)".to_string()
-    };
-    let status_area = Rect::new(inner.x, inner.y + 3, inner.width, 1);
-    frame.render_widget(Paragraph::new(Span::styled(status_line, Style::default().fg(app.theme.primary))).style(Style::default().bg(app.theme.bg)), status_area);
+        let status_line = "  Publishing... (esc to cancel)".to_string();
+        let status_area = Rect::new(inner.x, inner.y + 3, inner.width, 1);
+        frame.render_widget(Paragraph::new(Span::styled(status_line, Style::default().fg(app.theme.primary))).style(Style::default().bg(app.theme.bg)), status_area);
+    }
 }

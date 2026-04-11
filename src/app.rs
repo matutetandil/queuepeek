@@ -37,7 +37,7 @@ pub enum BgResult {
     ReplayComplete(Result<u64, String>),
     Topology(Result<(Vec<crate::backend::ExchangeInfo>, Vec<crate::backend::BindingInfo>), String>),
     BenchmarkProgress { completed: u32, total: u32, latency_ms: u64 },
-    BenchmarkComplete { total: u32, errors: u32, elapsed_ms: u64, avg_latency_ms: u64 },
+    BenchmarkComplete(BenchmarkStats),
     CompareMessages {
         queue_a: String,
         queue_b: String,
@@ -156,6 +156,10 @@ pub struct BenchmarkStats {
     pub errors: u32,
     pub elapsed_ms: u64,
     pub avg_latency_ms: u64,
+    pub p50_latency_ms: u64,
+    pub p95_latency_ms: u64,
+    pub p99_latency_ms: u64,
+    pub concurrency: u32,
 }
 
 pub struct ScheduledMessage {
@@ -1349,7 +1353,6 @@ impl App {
 
     pub fn do_benchmark(&mut self) {
         if let Some(ref backend) = self.backend {
-            let backend = backend.clone_backend();
             let namespace = self.selected_namespace.clone();
             let queue = self.selected_queue().map(|q| q.name.clone()).unwrap_or_default();
             let count: u32 = self.bench_count.parse().unwrap_or(1000);
@@ -1361,7 +1364,6 @@ impl App {
             self.bench_stats = None;
             self.popup = Popup::BenchmarkRunning;
 
-            // Use the publish form body as message template, or a default
             let body = if self.publish_form.body.is_empty() {
                 format!("{{\"benchmark\": true, \"timestamp\": {}}}", "{{timestamp}}")
             } else {
@@ -1378,50 +1380,97 @@ impl App {
                 self.publish_form.content_type.clone()
             };
 
+            // Pre-clone backends for each thread
+            let backends: Vec<Box<dyn crate::backend::Backend>> = (0..concurrency)
+                .map(|_| backend.clone_backend())
+                .collect();
+
             std::thread::spawn(move || {
+                use std::sync::atomic::{AtomicU32, Ordering};
+                use std::sync::{Arc, Mutex};
+
+                let completed = Arc::new(AtomicU32::new(0));
+                let errors = Arc::new(AtomicU32::new(0));
+                let latencies = Arc::new(Mutex::new(Vec::with_capacity(count as usize)));
                 let start = Instant::now();
-                let per_thread = count / concurrency;
-                let mut total_completed = 0u32;
-                let mut total_errors = 0u32;
-                let mut total_latency_ms = 0u64;
 
-                // Simple sequential approach (concurrency handled by fast publishing)
-                for i in 0..count {
-                    if cancel.load(std::sync::atomic::Ordering::Relaxed) {
-                        break;
-                    }
-                    let msg_start = Instant::now();
-                    let result = backend.publish_message(
-                        &namespace, &queue, &body, &routing_key, &[], &content_type,
-                    );
-                    let latency = msg_start.elapsed().as_millis() as u64;
-                    total_latency_ms += latency;
+                std::thread::scope(|s| {
+                    let per_thread = count / concurrency;
+                    let remainder = count % concurrency;
 
-                    match result {
-                        Ok(()) => total_completed += 1,
-                        Err(_) => total_errors += 1,
-                    }
+                    for (t, thread_backend) in backends.into_iter().enumerate() {
+                        let thread_count = per_thread + if (t as u32) < remainder { 1 } else { 0 };
+                        let namespace = &namespace;
+                        let queue = &queue;
+                        let body = &body;
+                        let routing_key = &routing_key;
+                        let content_type = &content_type;
+                        let cancel = &cancel;
+                        let tx = &tx;
+                        let completed = &completed;
+                        let errors = &errors;
+                        let latencies = &latencies;
 
-                    if i % 10 == 0 {
-                        let _ = tx.send(BgResult::BenchmarkProgress {
-                            completed: total_completed + total_errors,
-                            total: count,
-                            latency_ms: latency,
+                        s.spawn(move || {
+                            for _ in 0..thread_count {
+                                if cancel.load(Ordering::Relaxed) {
+                                    break;
+                                }
+                                let msg_start = Instant::now();
+                                let result = thread_backend.publish_message(
+                                    namespace, queue, body, routing_key, &[], content_type,
+                                );
+                                let latency = msg_start.elapsed().as_millis() as u64;
+
+                                match result {
+                                    Ok(()) => { completed.fetch_add(1, Ordering::Relaxed); }
+                                    Err(_) => { errors.fetch_add(1, Ordering::Relaxed); }
+                                }
+
+                                if let Ok(mut lats) = latencies.lock() {
+                                    lats.push(latency);
+                                }
+
+                                let done = completed.load(Ordering::Relaxed) + errors.load(Ordering::Relaxed);
+                                if done % 10 == 0 {
+                                    let _ = tx.send(BgResult::BenchmarkProgress {
+                                        completed: done,
+                                        total: count,
+                                        latency_ms: latency,
+                                    });
+                                }
+                            }
                         });
                     }
-                }
+                });
 
                 let elapsed = start.elapsed().as_millis() as u64;
-                let avg_latency = if total_completed > 0 {
-                    total_latency_ms / total_completed as u64
+                let total_completed = completed.load(std::sync::atomic::Ordering::Relaxed);
+                let total_errors = errors.load(std::sync::atomic::Ordering::Relaxed);
+
+                let mut lats = latencies.lock().unwrap_or_else(|e| e.into_inner());
+                lats.sort_unstable();
+
+                let percentile = |p: f64| -> u64 {
+                    if lats.is_empty() { return 0; }
+                    let idx = ((p / 100.0) * (lats.len() as f64 - 1.0)).round() as usize;
+                    lats[idx.min(lats.len() - 1)]
+                };
+
+                let avg_latency = if !lats.is_empty() {
+                    lats.iter().sum::<u64>() / lats.len() as u64
                 } else { 0 };
 
-                let _ = tx.send(BgResult::BenchmarkComplete {
+                let _ = tx.send(BgResult::BenchmarkComplete(BenchmarkStats {
                     total: total_completed,
                     errors: total_errors,
                     elapsed_ms: elapsed,
                     avg_latency_ms: avg_latency,
-                });
+                    p50_latency_ms: percentile(50.0),
+                    p95_latency_ms: percentile(95.0),
+                    p99_latency_ms: percentile(99.0),
+                    concurrency,
+                }));
             });
         }
     }
@@ -1903,14 +1952,16 @@ impl App {
                 BgResult::BenchmarkProgress { completed, total, latency_ms: _ } => {
                     self.bench_progress = (completed, total);
                 }
-                BgResult::BenchmarkComplete { total, errors, elapsed_ms, avg_latency_ms } => {
-                    self.bench_stats = Some(BenchmarkStats { total, errors, elapsed_ms, avg_latency_ms });
-                    let msgs_per_sec = if elapsed_ms > 0 { total as f64 / (elapsed_ms as f64 / 1000.0) } else { 0.0 };
+                BgResult::BenchmarkComplete(stats) => {
+                    let msgs_per_sec = if stats.elapsed_ms > 0 { stats.total as f64 / (stats.elapsed_ms as f64 / 1000.0) } else { 0.0 };
                     self.set_status(
-                        format!("Benchmark: {} msgs in {}ms ({:.0} msg/s, avg {}ms, {} errors)",
-                            total, elapsed_ms, msgs_per_sec, avg_latency_ms, errors),
-                        errors > 0,
+                        format!("Benchmark: {} msgs in {}ms ({:.0} msg/s, avg {}ms, p50 {}ms, p95 {}ms, p99 {}ms, {} errors, {} threads)",
+                            stats.total, stats.elapsed_ms, msgs_per_sec,
+                            stats.avg_latency_ms, stats.p50_latency_ms, stats.p95_latency_ms, stats.p99_latency_ms,
+                            stats.errors, stats.concurrency),
+                        stats.errors > 0,
                     );
+                    self.bench_stats = Some(stats);
                 }
                 BgResult::CompareMessages { queue_a, queue_b, messages_a, messages_b } => {
                     self.loading = false;
