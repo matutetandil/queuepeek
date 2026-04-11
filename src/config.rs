@@ -25,6 +25,8 @@ pub struct Profile {
     pub tls_ca: Option<String>,
     #[serde(default)]
     pub topics: Option<Vec<String>>,
+    #[serde(default)]
+    pub schema_registry: Option<SchemaRegistryConfig>,
 }
 
 impl Profile {
@@ -59,6 +61,15 @@ pub struct MessageTemplate {
     #[serde(default)]
     pub content_type: String,
     pub body: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SchemaRegistryConfig {
+    pub url: String,
+    #[serde(default)]
+    pub username: Option<String>,
+    #[serde(default)]
+    pub password: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

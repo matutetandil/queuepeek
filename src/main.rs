@@ -8,6 +8,7 @@ mod comparison;
 mod operations;
 mod utils;
 mod keys;
+mod schema;
 
 use std::io;
 use std::time::{Duration, Instant};

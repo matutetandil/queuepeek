@@ -344,6 +344,11 @@ pub struct App {
     pub scheduled_next_id: u64,
     pub scheduled_list_state: ListState,
 
+    // Schema Registry
+    pub schema_client: Option<crate::schema::SchemaRegistryClient>,
+    pub schema_decode_enabled: bool,
+    pub schema_decoded_cache: HashMap<usize, Result<crate::schema::DecodedMessage, String>>,
+
     // Retained messages (MQTT)
     pub retained_messages: Vec<MessageInfo>,
     pub retained_list_state: ListState,
@@ -596,6 +601,7 @@ impl ProfileForm {
             tls_key: None,
             tls_ca: None,
             topics: None,
+            schema_registry: None,
         })
     }
 
@@ -703,6 +709,9 @@ impl App {
             scheduled_messages: Vec::new(),
             scheduled_next_id: 1,
             scheduled_list_state: ListState::default(),
+            schema_client: None,
+            schema_decode_enabled: false,
+            schema_decoded_cache: HashMap::new(),
             retained_messages: Vec::new(),
             retained_list_state: ListState::default(),
             permissions: Vec::new(),
@@ -750,6 +759,22 @@ impl App {
                 self.profile_name = name.to_string();
                 self.loading = true;
                 self.set_status("Connecting...", false);
+
+                // Initialize schema registry client if configured
+                self.schema_client = None;
+                self.schema_decode_enabled = false;
+                self.schema_decoded_cache.clear();
+                if let Some(ref sr_config) = profile.schema_registry {
+                    match crate::schema::SchemaRegistryClient::new(sr_config) {
+                        Ok(client) => {
+                            self.schema_client = Some(client);
+                            self.schema_decode_enabled = true;
+                        }
+                        Err(e) => {
+                            self.set_status(format!("Schema Registry: {}", e), true);
+                        }
+                    }
+                }
 
                 self.load_broker_info();
                 self.load_namespaces();
@@ -1808,6 +1833,23 @@ impl App {
                 }
             }
         });
+    }
+
+    pub fn decode_message_schema(&mut self, msg_idx: usize) -> Option<&Result<crate::schema::DecodedMessage, String>> {
+        if !self.schema_decode_enabled { return None; }
+        if self.schema_client.is_none() { return None; }
+
+        if !self.schema_decoded_cache.contains_key(&msg_idx) {
+            if let Some(msg) = self.messages.get(msg_idx) {
+                let body = msg.body.clone();
+                if let Some(ref mut client) = self.schema_client {
+                    let result = client.decode_body_string(&body);
+                    self.schema_decoded_cache.insert(msg_idx, result);
+                }
+            }
+        }
+
+        self.schema_decoded_cache.get(&msg_idx)
     }
 
     pub fn load_permissions(&self) {

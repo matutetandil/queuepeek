@@ -66,7 +66,7 @@ fn draw_header(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(bar, area);
 }
 
-fn draw_content(frame: &mut Frame, app: &App, area: Rect) {
+fn draw_content(frame: &mut Frame, app: &mut App, area: Rect) {
     let msg = match app.messages.get(app.detail_message_idx) {
         Some(m) => m,
         None => {
@@ -131,13 +131,28 @@ fn draw_content(frame: &mut Frame, app: &App, area: Rect) {
     let headers_paragraph = Paragraph::new(header_lines).block(headers_block);
     frame.render_widget(headers_paragraph, content_chunks[0]);
 
-    // Optionally decode binary payload
-    let working_body = if app.detail_decoded {
-        decode_payload(&msg.body)
+    // Try schema registry decode first
+    let msg_idx = app.detail_message_idx;
+    let schema_result = if app.schema_decode_enabled && app.schema_client.is_some() {
+        app.decode_message_schema(msg_idx);
+        app.schema_decoded_cache.get(&msg_idx)
+            .and_then(|r| r.as_ref().ok())
+            .map(|d| (d.decoded_body.clone(), format!("{}#{}",d.schema_type, d.schema_id)))
     } else {
-        (msg.body.clone(), "")
+        None
     };
-    let (decoded_body, decode_label) = working_body;
+
+    let (decoded_body, decode_label) = if let Some((body, label)) = schema_result {
+        (body, label)
+    } else {
+        // Fallback to binary decode or raw
+        if app.detail_decoded {
+            let (b, l) = decode_payload(&app.messages.get(msg_idx).map(|m| m.body.as_str()).unwrap_or(""));
+            (b, l.to_string())
+        } else {
+            (app.messages.get(msg_idx).map(|m| m.body.clone()).unwrap_or_default(), String::new())
+        }
+    };
 
     // Payload block — auto-detect format and pretty-print with syntax highlighting
     let (payload_text, format_label) = if app.detail_pretty {
@@ -145,7 +160,7 @@ fn draw_content(frame: &mut Frame, app: &App, area: Rect) {
         let full_label = if decode_label.is_empty() {
             label.to_string()
         } else {
-            format!("{}+{}", label, decode_label)
+            format!("{}+{}", label, &decode_label)
         };
         let text = match label {
             "json" => highlight_json(&formatted, app.theme),
@@ -154,7 +169,7 @@ fn draw_content(frame: &mut Frame, app: &App, area: Rect) {
         };
         (text, full_label)
     } else {
-        let label = if decode_label.is_empty() { "raw".to_string() } else { format!("raw+{}", decode_label) };
+        let label = if decode_label.is_empty() { "raw".to_string() } else { format!("raw+{}", &decode_label) };
         (Text::styled(decoded_body, Style::default().fg(app.theme.primary)), label)
     };
 
@@ -473,6 +488,7 @@ fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
         Span::styled("  j/k", ks), Span::styled(":scroll ", ds),
         Span::styled("p", ks), Span::styled(":pretty ", ds),
         Span::styled("b", ks), Span::styled(":decode ", ds),
+        Span::styled("s", ks), Span::styled(":schema ", ds),
         Span::styled("c", ks), Span::styled(":copy payload ", ds),
         Span::styled("h", ks), Span::styled(":copy headers ", ds),
         Span::styled("E", ks), Span::styled(":edit ", ds),

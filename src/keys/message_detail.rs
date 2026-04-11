@@ -74,6 +74,20 @@ pub fn handle_message_detail_key(app: &mut App, code: KeyCode, modifiers: KeyMod
                 }
             }
         }
+        KeyCode::Char('s') => {
+            // Toggle schema registry decode
+            if app.schema_client.is_some() {
+                app.schema_decode_enabled = !app.schema_decode_enabled;
+                app.schema_decoded_cache.clear();
+                if app.schema_decode_enabled {
+                    app.set_status("Schema decode ON", false);
+                } else {
+                    app.set_status("Schema decode OFF", false);
+                }
+            } else {
+                app.set_status("No Schema Registry configured for this profile", true);
+            }
+        }
         KeyCode::Char('E') => {
             if let Some(msg) = app.messages.get(app.detail_message_idx) {
                 app.publish_form = app::PublishForm {
