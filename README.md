@@ -30,7 +30,7 @@ queuepeek connects to message broker management APIs and lets you browse queues/
 - Cloud host auto-detection
 - Publish messages to a queue or topic with a multi-line body editor
 - Payload templates with variable interpolation (save and load named templates)
-- Purge all messages from a queue (RabbitMQ, with confirmation)
+- Purge all messages from a queue (RabbitMQ and Kafka, with confirmation)
 - Delete a queue or topic (RabbitMQ, Kafka) with confirmation
 - Copy all messages from one queue to another, preserving order
 - Move all messages from one queue to another (destructive)
@@ -48,16 +48,21 @@ queuepeek connects to message broker management APIs and lets you browse queues/
 - Message list auto-refresh / tail mode (`T` toggle, `r` manual refresh) with `[live ⟳]` indicator
 - JSON and XML syntax highlighting in message detail (colored keys, strings, numbers)
 - Base64 and gzip auto-decode in message detail (`b` key) with format label showing decode method
+- Schema Registry / Avro decode in message detail (`s` key) — Confluent wire format auto-decode
 - Edit & re-publish message from detail view (`E` key)
 - DLQ detection and re-routing (`L` key) — parses x-death header, re-publishes to original exchange
 - Kafka consumer groups popup (`G` on queue list) with per-partition lag info
+- Kafka consumer group offset reset (`R` in consumer groups popup)
 - Kafka message replay from offset range to destination topic (`Y` key in message list)
-- Benchmark / load testing (`F5` on queue list) — flood-publish with live throughput and latency results
+- Benchmark / load testing (`F5` on queue list) — concurrent flood-publish with throughput and latency percentiles (p50/p95/p99)
 - Stream-based delete uses temp file backup for safe recovery on failure
 - Auto-update check on startup and hourly via GitHub Releases
 - Message scheduling with in-app timer (`Ctrl+S` in publish popup, `S` to view/cancel pending)
+- Scheduled messages persisted to `~/.config/queuepeek/scheduled.json` (survive restarts)
 - Queue comparison / diff between two queues (`=` key on queue list)
-- Kafka consumer group offset reset (`R` in consumer groups popup)
+- MQTT retained message management (`H` on queue list) — scan, view, and clear retained messages
+- ACL / permission viewer (`A` on queue list) — color-coded permission table (RabbitMQ)
+- Webhook alerts on message pattern match (`W` on queue list) — regex-based HTTP POST notifications
 
 ## Supported Backends
 
@@ -73,7 +78,7 @@ queuepeek connects to message broker management APIs and lets you browse queues/
 
 **Kafka** connects via the native protocol using `librdkafka`. Topics are discovered from cluster metadata, and messages are consumed from tail offsets using ephemeral consumer groups with auto-commit disabled. Publishing uses `BaseProducer`. Topic deletion is supported.
 
-**MQTT** connects via the MQTT protocol. Topics are discovered by subscribing to the wildcard topic `#`, or you can pre-configure specific topics in your profile. Note: MQTT subscriptions consume messages — there is no non-destructive peek. A warning is displayed in the UI. Publishing uses QoS 1.
+**MQTT** connects via the MQTT protocol. Topics are discovered by subscribing to the wildcard topic `#`, or you can pre-configure specific topics in your profile. Note: MQTT subscriptions consume messages — there is no non-destructive peek. A warning is displayed in the UI. Publishing uses QoS 1. Retained messages can be listed and cleared via the `H` key on the queue list.
 
 ### Operation Support Matrix
 
@@ -99,6 +104,10 @@ queuepeek connects to message broker management APIs and lets you browse queues/
 | Topology view                    | Yes      | No    | No     |
 | Replay messages                  | No       | Yes   | No     |
 | Benchmark / load test            | Yes      | Yes   | Yes    |
+| Retained message management      | No       | No    | Yes    |
+| ACL / permission viewer          | Yes      | No    | No     |
+| Webhook alerts                   | Yes      | Yes   | Yes    |
+| Avro / Schema Registry decode    | Yes      | Yes   | No     |
 
 \* MQTT subscriptions are inherently destructive (messages are consumed on read). Copy, move, and delete operations work but read from the subscription stream — there is no non-destructive peek.
 
@@ -152,6 +161,7 @@ tls      = true
 tls_cert = "/path/to/client.crt"
 tls_key  = "/path/to/client.key"
 tls_ca   = "/path/to/ca.crt"
+schema_registry = "http://schema-registry.internal.company.com:8081"
 
 [profiles.my-kafka]
 type     = "kafka"
@@ -159,6 +169,7 @@ host     = "kafka.example.com"
 port     = 9092
 username = "admin"
 password = "secret"
+schema_registry = "http://schema-registry.example.com:8081"
 
 [profiles.my-mqtt]
 type     = "mqtt"
@@ -183,6 +194,10 @@ Set `tls = true` to enable TLS. Provide `tls_cert`, `tls_key`, and `tls_ca` path
 - **Kafka**: Uses SASL_SSL with PLAIN mechanism
 - **MQTT**: Uses mqtts:// (MQTT over TLS)
 
+### Schema Registry
+
+Set `schema_registry` in a profile to point to a Confluent-compatible Schema Registry URL. When configured, the `s` key in the message detail view will attempt to decode Avro messages using the registry. Messages must use the Confluent wire format (magic byte `0x00` followed by a 4-byte schema ID). Decoded content is rendered as pretty-printed JSON and combines with syntax highlighting.
+
 ### Saved Filters
 
 Named filter expressions can be saved per queue using `Ctrl+B` in the message list filter input. Saved filters are stored in `config.toml` and can be loaded at any time with `B`. This is useful for recurring search patterns (e.g. filtering by a specific routing key or header value).
@@ -190,6 +205,14 @@ Named filter expressions can be saved per queue using `Ctrl+B` in the message li
 ### Payload Templates
 
 Message body templates can be saved and loaded in the publish popup. Use `Ctrl+W` to save the current body as a named template, and `Ctrl+T` to load a saved template. Templates support variable interpolation: `{{timestamp}}`, `{{uuid}}`, `{{random_int}}`, `{{counter}}`, and `{{env.VAR}}`. Variables are resolved at publish time.
+
+### Webhook Alerts
+
+Press `W` on a selected queue in the queue list to open the webhook alert configuration popup. Specify a regex pattern and an HTTP POST endpoint URL. During auto-refresh, if any incoming message body matches the pattern, queuepeek sends a POST request with the message details to the webhook URL. Alerts are deduplicated by content hash within a session. Configuration is persisted in `config.toml`.
+
+### Scheduled Messages
+
+Scheduled messages are saved to `~/.config/queuepeek/scheduled.json` so they persist across restarts. On startup, any messages whose scheduled time has already passed are published immediately. Messages that are still pending resume their countdown from the remaining time.
 
 ## Usage
 
@@ -202,9 +225,9 @@ queuepeek
 The wizard flow proceeds through four screens:
 
 1. **Profile selection** — Choose a saved profile or create a new one.
-2. **Queue list** — Browse queues/topics for the active namespace. Queues auto-refresh every 5 seconds. Filter by name with `/`. Publish, purge, delete, copy, move, compare, schedule, topology, and benchmark operations are available here.
+2. **Queue list** — Browse queues/topics for the active namespace. Queues auto-refresh every 5 seconds. Filter by name with `/`. Publish, purge, delete, copy, move, compare, schedule, topology, benchmark, retained messages, ACL, and webhook alert operations are available here.
 3. **Message list** — Browse fetched messages for the selected queue/topic. Filter messages with `/` (Tab to toggle advanced filter mode). Use Space to select individual messages or `a` to select all. Perform bulk operations on the selection with `C`, `D`, `e`, `R`, `d` (diff), or `Y` (replay).
-4. **Message detail** — View full message payload, headers, and metadata. Toggle pretty-print, toggle binary decode (`b`), copy to clipboard, scroll through the payload.
+4. **Message detail** — View full message payload, headers, and metadata. Toggle pretty-print, toggle binary decode (`b`), toggle Avro decode (`s`), copy to clipboard, scroll through the payload.
 
 Press `Esc` or `Backspace` at any screen to go back one level. In the message list, the first `Esc` clears the current selection; the second `Esc` returns to the queue list.
 
@@ -236,7 +259,7 @@ Press `Esc` or `Backspace` at any screen to go back one level. In the message li
 | `v`          | Switch namespace / vhost                             |
 | `p`          | Switch profile                                       |
 | `P`          | Publish a message to the selected queue              |
-| `x`          | Purge selected queue (RabbitMQ, with confirmation)   |
+| `x`          | Purge selected queue (with confirmation)             |
 | `D`          | Delete selected queue/topic (with confirmation)      |
 | `C`          | Copy all messages to another queue (with picker)     |
 | `m`          | Move all messages to another queue (with picker)     |
@@ -246,6 +269,9 @@ Press `Esc` or `Backspace` at any screen to go back one level. In the message li
 | `X`          | Show exchange and binding topology (RabbitMQ)        |
 | `F5`         | Benchmark: flood-publish N messages, show throughput |
 | `S`          | View pending scheduled messages                      |
+| `H`          | Manage retained messages (MQTT only)                 |
+| `A`          | View ACL / permission table (RabbitMQ only)          |
+| `W`          | Configure webhook alert for selected queue           |
 | `t`          | Open theme picker                                    |
 | `Esc`        | Go back to profile screen                            |
 | `q` / Ctrl+C | Quit                                                 |
@@ -316,6 +342,7 @@ Selection state is shown as a checkbox prefix on each message row (☑ selected,
 | PgDown/PgUp  | Scroll 10 lines at a time       |
 | `p`          | Toggle pretty-print             |
 | `b`          | Toggle base64/gzip decode       |
+| `s`          | Toggle Avro / Schema Registry decode |
 | `c`          | Copy payload to clipboard       |
 | `h`          | Copy headers to clipboard       |
 | `E`          | Edit & re-publish message       |
@@ -359,6 +386,15 @@ Selection state is shown as a checkbox prefix on each message row (☑ selected,
 | `k`   | Scroll up       |
 | `Esc` | Close popup     |
 
+### Retained Messages Popup (MQTT)
+
+| Key   | Action                                   |
+|-------|------------------------------------------|
+| `j`   | Move selection down                      |
+| `k`   | Move selection up                        |
+| `d`   | Clear the selected retained message      |
+| `Esc` | Close popup                              |
+
 ### Replay Config Popup (Kafka)
 
 | Key         | Action                          |
@@ -377,11 +413,50 @@ Selection state is shown as a checkbox prefix on each message row (☑ selected,
 | `Enter`     | Start benchmark                 |
 | `Esc`       | Cancel / stop in-progress run   |
 
+## Architecture
+
+The application is organized into focused modules:
+
+```
+src/
+├── main.rs              # Entry point (~98 lines): terminal init, event loop
+├── app.rs               # Central state machine: Screen enum, Popup variants,
+│                        # BgResult variants, background task launchers
+├── config.rs            # Config structs: Profile, SavedFilter, MessageTemplate,
+│                        # WebhookAlert; load/save for config.toml and scheduled.json
+├── updater.rs           # Auto-update via GitHub Releases
+├── filters.rs           # Filter expression parser and evaluator
+├── comparison.rs        # Queue diff / comparison logic
+├── operations.rs        # Background operation helpers (copy, move, delete, dump, etc.)
+├── utils.rs             # Shared utilities
+├── keys/                # Key handlers, one module per screen
+│   ├── profiles.rs
+│   ├── queue_list.rs
+│   ├── message_list.rs
+│   ├── message_detail.rs
+│   └── popups.rs
+├── backend/
+│   ├── mod.rs           # Backend trait and shared structs
+│   ├── rabbitmq.rs      # RabbitMQ Management API implementation
+│   ├── kafka.rs         # Kafka implementation (rdkafka)
+│   └── mqtt.rs          # MQTT implementation (rumqttc)
+└── ui/
+    ├── mod.rs            # Draw dispatcher
+    ├── profiles.rs       # Profile list and form rendering
+    ├── queue_list.rs     # Queue list rendering with sparklines
+    ├── message_list.rs   # Message list rendering with multi-select
+    ├── message_detail.rs # Message detail with syntax highlighting and decode
+    ├── popup.rs          # All popup rendering functions
+    └── theme.rs          # 5 built-in themes with live preview
+```
+
+The `Backend` trait abstracts all broker-specific logic. Background I/O runs in threads that communicate back to the main event loop via `std::sync::mpsc` channels. The event loop polls both crossterm input events and the mpsc receiver on each tick, keeping the UI responsive.
+
 ## Tech Stack
 
 - [ratatui](https://github.com/ratatui-org/ratatui) — Terminal UI rendering
 - [crossterm](https://github.com/crossterm-rs/crossterm) — Cross-platform terminal control
-- [reqwest](https://github.com/seanmonstar/reqwest) — HTTP client for RabbitMQ Management API
+- [reqwest](https://github.com/seanmonstar/reqwest) — HTTP client for RabbitMQ Management API and webhook delivery
 - [rdkafka](https://github.com/fede1024/rust-rdkafka) — Kafka client (librdkafka wrapper)
 - [rumqttc](https://github.com/bytebeamio/rumqtt) — MQTT client
 - [serde / toml](https://github.com/toml-rs/toml) — Configuration parsing
@@ -390,6 +465,8 @@ Selection state is shown as a checkbox prefix on each message row (☑ selected,
 - [similar](https://github.com/mitsuhiko/similar) — Diff engine for message comparison
 - [base64](https://github.com/marshallpierce/rust-base64) — Base64 encoding/decoding
 - [flate2](https://github.com/rust-lang/flate2-rs) — Gzip decompression
+- [regex](https://github.com/rust-lang/regex) — Regex pattern matching for webhook alerts
+- [apache-avro](https://github.com/apache/avro) — Avro decoding for Schema Registry integration
 
 ## License
 

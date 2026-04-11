@@ -17,28 +17,49 @@ cargo build --release        # optimized release build
 
 ## Architecture
 
-- `src/main.rs` — Entry point. Initializes the terminal, sets up crossterm raw mode, and runs the main event loop.
-- `src/app.rs` — Central state machine. Holds current screen, selected profile, queue, message, and UI state. All screen transitions go through here.
-- `src/config.rs` — Loads and saves `~/.config/queuepeek/config.toml`. Defines the `Profile` struct with `type` field (rabbitmq / kafka / mqtt), host, port, credentials, vhost, TLS settings, and optional `topics` list (for MQTT).
-- `src/backend/mod.rs` — Defines the `Backend` trait. All broker implementations must satisfy this trait.
-- `src/backend/rabbitmq.rs` — RabbitMQ implementation. Uses the Management HTTP API. Implements queue listing, message fetching, and vhost enumeration.
-- `src/backend/kafka.rs` — Kafka implementation. Uses rdkafka for topic listing (via cluster metadata), message consumption (ephemeral consumer groups), and broker info.
-- `src/backend/mqtt.rs` — MQTT implementation. Uses rumqttc for topic discovery (wildcard `#` subscription or pre-configured topics list) and message reading via subscriptions. Note: MQTT consumes messages on read (no peek).
-- `src/ui/` — One module per screen. Each module owns rendering logic for that screen and returns keybinding hints for the footer.
-  - `profiles.rs` — Profile selection list and profile form (create/edit).
-  - `queues.rs` — Queue list with filter input, auto-refresh indicator, and rate columns.
-  - `messages.rs` — Message list with filter input and fetch count picker popup.
-  - `detail.rs` — Message detail with scrollable payload, headers panel, pretty-print toggle, and clipboard actions.
-  - `theme.rs` — Theme picker popup with color swatches and live preview.
+### Core modules
+- `src/main.rs` — Entry point (~98 lines). Terminal setup, event loop, auto-refresh timers.
+- `src/app.rs` — Central state machine (~1900 lines). Holds App struct with all state, BgResult enum, background task launchers, process_bg_results.
+- `src/config.rs` — Loads/saves `~/.config/queuepeek/config.toml`. Profile, WebhookAlert, SavedFilter, MessageTemplate, SchemaRegistryConfig.
+
+### Key handler modules (`src/keys/`)
+- `mod.rs` — Top-level key dispatch (handle_key).
+- `profile.rs` — Profile screen: select, add/edit form, delete confirm.
+- `queue_list.rs` — Queue list: navigation, filter, queue operations, alert/permission/retained shortcuts.
+- `message_list.rs` — Message list: multi-select, filter, bulk operations.
+- `message_detail.rs` — Message detail: scroll, pretty-print, decode, clipboard, schema toggle.
+- `popup.rs` — All popup key handlers (~910 lines). Unified queue picker and publish/edit handlers.
+
+### Backend modules (`src/backend/`)
+- `mod.rs` — Backend trait (~20 methods), data structs (QueueInfo, MessageInfo, PermissionEntry, etc.).
+- `rabbitmq.rs` — RabbitMQ Management HTTP API. All operations + permissions + topology.
+- `kafka.rs` — rdkafka-based. Topics, consumer groups, replay, offset reset.
+- `mqtt.rs` — rumqttc-based. Topic discovery, retained messages, publish.
+
+### UI modules (`src/ui/`)
+- `mod.rs` — Draw dispatcher per Screen.
+- `profiles.rs`, `queue_list.rs`, `message_list.rs`, `message_detail.rs` — One per screen.
+- `popup.rs` — ~38 popup draw functions.
+- `theme.rs` — 5 themes with picker and live preview.
+
+### Extracted logic modules
+- `src/filters.rs` — Advanced filter engine (FilterExpr, parse, eval).
+- `src/comparison.rs` — Queue diff algorithm (hash-based).
+- `src/operations.rs` — Dump strategies (RabbitMQ/Kafka/MQTT), message serialization, x-death parsing.
+- `src/utils.rs` — Template interpolation, clipboard.
+- `src/schema.rs` — Schema Registry client, Avro decode, schema cache.
+- `src/updater.rs` — Auto-update via GitHub Releases.
 
 ## Key Patterns
 
-- Screen navigation follows a wizard flow. The `App` state machine holds a `Screen` enum with variants for each step. `Esc` or `Backspace` pops one level back.
-- The `Backend` trait abstracts broker-specific logic. New backends implement `list_queues`, `peek_messages`, and `list_namespaces` (vhosts for RabbitMQ, single "default" for Kafka/MQTT).
-- Background I/O runs in threads that communicate back to the main loop via `std::sync::mpsc` channels. The event loop polls both crossterm input events and the mpsc receiver on each tick.
-- Auto-refresh for the queue list is driven by a timer tracked in `App`. Every 5 seconds the app dispatches a background fetch and updates queue data when results arrive.
-- Pretty-print state is per-message and toggled with `p`. Detection runs on first open: if the payload parses as valid JSON or XML it is formatted automatically.
-- The theme is stored in `App` and passed to all UI modules on each render. The theme picker shows a live preview by re-rendering with the candidate theme before the user confirms.
+- Screen navigation follows a wizard flow. The `App` state machine holds a `Screen` enum with variants for each step. `Esc` pops one level back.
+- The `Backend` trait abstracts broker-specific logic. Optional methods return `Err("not supported")` by default.
+- Background I/O runs in threads via `std::sync::mpsc` channels. The event loop polls crossterm input and the mpsc receiver each tick.
+- Auto-refresh: queue list every 5s, message list when tail mode is on.
+- Benchmarks use `std::thread::scope` for real parallelism with shared atomic counters.
+- Schema Registry decode uses Confluent wire format (0x00 + 4-byte schema ID + payload).
+- Webhook alerts check every 30s with regex pattern matching and hash-based deduplication.
+- Scheduled messages persist to `~/.config/queuepeek/scheduled.json` using epoch seconds.
 
 ## Config Path
 
@@ -59,4 +80,16 @@ username = "guest"
 password = "guest"
 vhost    = "/"
 tls      = false
+
+[profiles.local.schema_registry]
+url      = "http://localhost:8081"
+username = ""
+password = ""
+
+[[webhook_alerts]]
+name        = "error-monitor"
+pattern     = "(?i)error|exception"
+webhook_url = "https://hooks.example.com/alert"
+enabled     = true
+queues      = []
 ```

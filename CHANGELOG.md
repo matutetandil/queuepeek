@@ -1,5 +1,51 @@
 # Changelog
 
+## [0.7.0] - 2026-04-10
+
+### Changed
+- Split `app.rs` (2368 lines) and `main.rs` (2045 lines) into focused modules
+  - New `src/keys/` directory with one handler file per screen, eliminating deeply nested match arms
+  - New `src/filters.rs` for filter expression parsing and evaluation
+  - New `src/comparison.rs` for queue diff logic
+  - New `src/operations.rs` for background operation helpers
+  - New `src/utils.rs` for shared utilities
+  - Deduplicated three queue picker key handler variants and two publish/edit popup handlers
+  - `main.rs` reduced to ~98 lines (entry point only); `app.rs` reduced to ~1908 lines
+- Real concurrent benchmark using `std::thread::scope`-based parallelism
+  - Configurable thread count replaces the previous sequential flood loop
+  - Results now include latency percentiles: p50, p95, p99 in addition to average latency
+- Benchmark config popup updated with a Concurrency field (thread count)
+
+### Added
+- Persist scheduled messages to disk (`~/.config/queuepeek/scheduled.json`)
+  - Scheduled messages survive app restarts
+  - Messages whose scheduled time has already passed fire immediately on startup
+  - File is written on every change (add or cancel) and read on startup
+- MQTT retained message management (`H` key on queue list, MQTT only)
+  - Scan retained messages via a timed wildcard subscription
+  - View retained message list in a popup with `j`/`k` navigation
+  - Clear individual retained messages by publishing an empty payload to the same topic
+  - New Backend trait methods: `list_retained_messages`, `clear_retained_message`
+- ACL / permission viewer (`A` key on queue list)
+  - RabbitMQ: fetches user permission records from the Management API
+  - Displays a color-coded table with configure, write, and read permission patterns per user and vhost
+  - Other backends show "not supported"
+- Webhook alerts on message pattern match (`W` key on queue list for configuration)
+  - Define a regex pattern and an HTTP POST webhook URL per queue
+  - Alert fires when an incoming message body matches the pattern during auto-refresh
+  - Deduplicates alerts by content hash to avoid repeated notifications for the same message
+  - Alert log visible in a popup; entries show timestamp, matched pattern, and message preview
+  - Alert configuration is persisted in `config.toml`
+  - New dependency: `regex = "1"`
+- Schema Registry / Avro decode (`s` key toggle in message detail)
+  - Confluent Schema Registry integration; URL configured per profile via `schema_registry` field
+  - Auto-decodes Avro messages using the Confluent wire format (magic byte `0x00` + 4-byte schema ID + Avro payload)
+  - Decoded Avro record is rendered as pretty-printed JSON
+  - Falls back gracefully if the Schema Registry is unreachable or the schema ID is unknown
+  - New dependency: `apache-avro = "0.17"`
+
+---
+
 ## [0.6.0] - 2026-04-09
 
 ### Added
