@@ -104,3 +104,164 @@ pub fn eval_filter_expr(expr: &FilterExpr, msg: &MessageInfo) -> bool {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::backend::MessageInfo;
+
+    fn make_msg(body: &str, routing_key: &str, headers: Vec<(&str, &str)>) -> MessageInfo {
+        MessageInfo {
+            index: 1,
+            routing_key: routing_key.to_string(),
+            exchange: "test-exchange".to_string(),
+            redelivered: false,
+            timestamp: None,
+            content_type: "application/json".to_string(),
+            headers: headers.into_iter().map(|(k, v)| (k.to_string(), v.to_string())).collect(),
+            body: body.to_string(),
+        }
+    }
+
+    // --- parse_filter_expr ---
+
+    #[test]
+    fn parse_substring() {
+        let expr = parse_filter_expr("hello");
+        assert!(matches!(expr, FilterExpr::Substring(s) if s == "hello"));
+    }
+
+    #[test]
+    fn parse_field_equals() {
+        let expr = parse_filter_expr("routing_key = \"orders\"");
+        assert!(matches!(expr, FilterExpr::FieldEquals { ref field, ref value } if field == "routing_key" && value == "orders"));
+    }
+
+    #[test]
+    fn parse_field_contains() {
+        let expr = parse_filter_expr("body contains \"error\"");
+        assert!(matches!(expr, FilterExpr::FieldContains { ref field, ref value } if field == "body" && value == "error"));
+    }
+
+    #[test]
+    fn parse_field_not_equals() {
+        let expr = parse_filter_expr("exchange != \"dlx\"");
+        assert!(matches!(expr, FilterExpr::FieldNotEquals { ref field, ref value } if field == "exchange" && value == "dlx"));
+    }
+
+    #[test]
+    fn parse_contains_case_insensitive() {
+        let expr = parse_filter_expr("body CONTAINS \"Test\"");
+        assert!(matches!(expr, FilterExpr::FieldContains { .. }));
+    }
+
+    // --- resolve_field ---
+
+    #[test]
+    fn resolve_body() {
+        let msg = make_msg("hello world", "key", vec![]);
+        assert_eq!(resolve_field("body", &msg), "hello world");
+    }
+
+    #[test]
+    fn resolve_routing_key() {
+        let msg = make_msg("", "my.key", vec![]);
+        assert_eq!(resolve_field("routing_key", &msg), "my.key");
+    }
+
+    #[test]
+    fn resolve_header() {
+        let msg = make_msg("", "", vec![("x-type", "important")]);
+        assert_eq!(resolve_field("header.x-type", &msg), "important");
+    }
+
+    #[test]
+    fn resolve_header_case_insensitive() {
+        let msg = make_msg("", "", vec![("Content-Type", "text/plain")]);
+        assert_eq!(resolve_field("header.content-type", &msg), "text/plain");
+    }
+
+    #[test]
+    fn resolve_body_json_path() {
+        let msg = make_msg(r#"{"user": {"id": 42, "name": "alice"}}"#, "", vec![]);
+        assert_eq!(resolve_field("body.user.name", &msg), "alice");
+        assert_eq!(resolve_field("body.user.id", &msg), "42");
+    }
+
+    #[test]
+    fn resolve_body_json_path_missing() {
+        let msg = make_msg(r#"{"foo": "bar"}"#, "", vec![]);
+        assert_eq!(resolve_field("body.nonexistent.path", &msg), "");
+    }
+
+    #[test]
+    fn resolve_unknown_field() {
+        let msg = make_msg("", "", vec![]);
+        assert_eq!(resolve_field("unknown_field", &msg), "");
+    }
+
+    // --- eval_filter_expr ---
+
+    #[test]
+    fn eval_substring_matches_body() {
+        let msg = make_msg("hello world", "", vec![]);
+        let expr = parse_filter_expr("hello");
+        assert!(eval_filter_expr(&expr, &msg));
+    }
+
+    #[test]
+    fn eval_substring_matches_routing_key() {
+        let msg = make_msg("", "order.created", vec![]);
+        let expr = parse_filter_expr("order");
+        assert!(eval_filter_expr(&expr, &msg));
+    }
+
+    #[test]
+    fn eval_substring_no_match() {
+        let msg = make_msg("foo", "bar", vec![]);
+        let expr = parse_filter_expr("baz");
+        assert!(!eval_filter_expr(&expr, &msg));
+    }
+
+    #[test]
+    fn eval_field_equals_match() {
+        let msg = make_msg("", "orders", vec![]);
+        let expr = parse_filter_expr("routing_key = \"orders\"");
+        assert!(eval_filter_expr(&expr, &msg));
+    }
+
+    #[test]
+    fn eval_field_equals_case_insensitive() {
+        let msg = make_msg("", "Orders", vec![]);
+        let expr = parse_filter_expr("routing_key = \"orders\"");
+        assert!(eval_filter_expr(&expr, &msg));
+    }
+
+    #[test]
+    fn eval_field_contains() {
+        let msg = make_msg(r#"{"error": "something failed"}"#, "", vec![]);
+        let expr = parse_filter_expr("body contains \"failed\"");
+        assert!(eval_filter_expr(&expr, &msg));
+    }
+
+    #[test]
+    fn eval_field_not_equals() {
+        let msg = make_msg("", "", vec![]);
+        let expr = parse_filter_expr("exchange != \"dlx\"");
+        assert!(eval_filter_expr(&expr, &msg));
+    }
+
+    #[test]
+    fn eval_header_field_equals() {
+        let msg = make_msg("", "", vec![("x-type", "important")]);
+        let expr = parse_filter_expr("header.x-type = \"important\"");
+        assert!(eval_filter_expr(&expr, &msg));
+    }
+
+    #[test]
+    fn eval_json_path_equals() {
+        let msg = make_msg(r#"{"status": "error"}"#, "", vec![]);
+        let expr = parse_filter_expr("body.status = \"error\"");
+        assert!(eval_filter_expr(&expr, &msg));
+    }
+}

@@ -250,6 +250,115 @@ pub fn dump_kafka(
     ));
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::backend::MessageInfo;
+
+    fn make_msg() -> MessageInfo {
+        MessageInfo {
+            index: 1,
+            routing_key: "test.key".to_string(),
+            exchange: "amq.direct".to_string(),
+            redelivered: false,
+            timestamp: Some(1700000000),
+            content_type: "application/json".to_string(),
+            headers: vec![
+                ("x-type".to_string(), "important".to_string()),
+                ("x-retry".to_string(), "3".to_string()),
+            ],
+            body: r#"{"hello": "world"}"#.to_string(),
+        }
+    }
+
+    // --- message_to_json ---
+
+    #[test]
+    fn message_to_json_roundtrip() {
+        let msg = make_msg();
+        let json_str = message_to_json(&msg);
+        let parsed: serde_json::Value = serde_json::from_str(&json_str).unwrap();
+
+        assert_eq!(parsed["routing_key"], "test.key");
+        assert_eq!(parsed["exchange"], "amq.direct");
+        assert_eq!(parsed["redelivered"], false);
+        assert_eq!(parsed["timestamp"], 1700000000);
+        assert_eq!(parsed["content_type"], "application/json");
+        assert_eq!(parsed["body"], r#"{"hello": "world"}"#);
+        assert_eq!(parsed["headers"]["x-type"], "important");
+        assert_eq!(parsed["headers"]["x-retry"], "3");
+    }
+
+    #[test]
+    fn message_to_json_empty_msg() {
+        let msg = MessageInfo {
+            index: 0,
+            routing_key: String::new(),
+            exchange: String::new(),
+            redelivered: false,
+            timestamp: None,
+            content_type: String::new(),
+            headers: vec![],
+            body: String::new(),
+        };
+        let json_str = message_to_json(&msg);
+        let parsed: serde_json::Value = serde_json::from_str(&json_str).unwrap();
+        assert_eq!(parsed["body"], "");
+        assert!(parsed["timestamp"].is_null());
+    }
+
+    // --- parse_x_death_value ---
+
+    #[test]
+    fn parse_x_death_valid_array() {
+        let value = r#"[{"exchange":"my-exchange","routing-keys":["my.key"],"count":1}]"#;
+        let result = parse_x_death_value(value);
+        assert_eq!(result, Some(("my-exchange".to_string(), "my.key".to_string())));
+    }
+
+    #[test]
+    fn parse_x_death_single_object() {
+        let value = r#"{"exchange":"dlx","routing-keys":["original.key"]}"#;
+        let result = parse_x_death_value(value);
+        assert_eq!(result, Some(("dlx".to_string(), "original.key".to_string())));
+    }
+
+    #[test]
+    fn parse_x_death_empty_exchange() {
+        let value = r#"[{"exchange":"","routing-keys":["key"]}]"#;
+        let result = parse_x_death_value(value);
+        assert_eq!(result, Some(("".to_string(), "key".to_string())));
+    }
+
+    #[test]
+    fn parse_x_death_no_routing_keys() {
+        let value = r#"[{"exchange":"ex"}]"#;
+        let result = parse_x_death_value(value);
+        assert_eq!(result, Some(("ex".to_string(), "".to_string())));
+    }
+
+    #[test]
+    fn parse_x_death_invalid_json() {
+        let result = parse_x_death_value("not json");
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn parse_x_death_empty_object() {
+        let result = parse_x_death_value(r#"[{}]"#);
+        assert_eq!(result, None); // both exchange and routing_key are empty
+    }
+
+    // --- chrono_timestamp ---
+
+    #[test]
+    fn chrono_timestamp_is_numeric() {
+        let ts = chrono_timestamp();
+        assert!(ts.parse::<u64>().is_ok());
+        assert!(ts.parse::<u64>().unwrap() > 1_000_000_000);
+    }
+}
+
 /// Simple peek-based dump for MQTT and other backends
 pub fn dump_simple_peek(
     backend: Box<dyn Backend>,

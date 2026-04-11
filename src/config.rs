@@ -151,3 +151,135 @@ impl Config {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn profile_base_url_http() {
+        let p = Profile {
+            host: "localhost".to_string(),
+            port: 15672,
+            tls: Some(false),
+            ..Default::default()
+        };
+        assert_eq!(p.base_url(), "http://localhost:15672");
+    }
+
+    #[test]
+    fn profile_base_url_https() {
+        let p = Profile {
+            host: "rabbit.example.com".to_string(),
+            port: 443,
+            tls: Some(true),
+            ..Default::default()
+        };
+        assert_eq!(p.base_url(), "https://rabbit.example.com:443");
+    }
+
+    #[test]
+    fn profile_vhost_or_default() {
+        let p = Profile { vhost: None, ..Default::default() };
+        assert_eq!(p.vhost_or_default(), "/");
+
+        let p2 = Profile { vhost: Some("production".to_string()), ..Default::default() };
+        assert_eq!(p2.vhost_or_default(), "production");
+    }
+
+    #[test]
+    fn profile_is_cloud_host() {
+        let p = Profile { host: "crisp-orange.rmq6.cloudamqp.com".to_string(), ..Default::default() };
+        assert!(p.is_cloud_host());
+
+        let p2 = Profile { host: "my-rabbit.amazonaws.com".to_string(), ..Default::default() };
+        assert!(p2.is_cloud_host());
+
+        let p3 = Profile { host: "localhost".to_string(), ..Default::default() };
+        assert!(!p3.is_cloud_host());
+    }
+
+    #[test]
+    fn config_profile_crud() {
+        let mut config = Config::default();
+        assert!(config.profile_names().is_empty());
+
+        let profile = Profile {
+            profile_type: "rabbitmq".to_string(),
+            host: "localhost".to_string(),
+            port: 15672,
+            username: "guest".to_string(),
+            password: "guest".to_string(),
+            ..Default::default()
+        };
+
+        config.add_profile("local".to_string(), profile);
+        assert_eq!(config.profile_names(), vec!["local"]);
+
+        config.delete_profile("local");
+        assert!(config.profile_names().is_empty());
+    }
+
+    #[test]
+    fn config_delete_clears_default() {
+        let mut config = Config::default();
+        config.default_profile = Some("test".to_string());
+        config.add_profile("test".to_string(), Profile::default());
+
+        config.delete_profile("test");
+        assert_eq!(config.default_profile, None);
+    }
+
+    #[test]
+    fn config_profile_names_sorted() {
+        let mut config = Config::default();
+        config.add_profile("zebra".to_string(), Profile::default());
+        config.add_profile("alpha".to_string(), Profile::default());
+        config.add_profile("middle".to_string(), Profile::default());
+
+        assert_eq!(config.profile_names(), vec!["alpha", "middle", "zebra"]);
+    }
+
+    #[test]
+    fn config_save_load_roundtrip() {
+        let dir = std::env::temp_dir().join("queuepeek-test");
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join("test-config.toml");
+        let path_str = path.to_str().unwrap();
+
+        let mut config = Config::default();
+        config.default_profile = Some("local".to_string());
+        config.theme = Some("dracula".to_string());
+        config.add_profile("local".to_string(), Profile {
+            profile_type: "rabbitmq".to_string(),
+            host: "localhost".to_string(),
+            port: 15672,
+            username: "guest".to_string(),
+            password: "guest".to_string(),
+            vhost: Some("/".to_string()),
+            tls: Some(false),
+            ..Default::default()
+        });
+
+        config.save(Some(path_str)).unwrap();
+
+        let loaded = Config::load(Some(path_str));
+        assert_eq!(loaded.default_profile, Some("local".to_string()));
+        assert_eq!(loaded.theme, Some("dracula".to_string()));
+
+        let profile = loaded.profiles.get("local").unwrap();
+        assert_eq!(profile.host, "localhost");
+        assert_eq!(profile.port, 15672);
+        assert_eq!(profile.profile_type, "rabbitmq");
+
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_dir(&dir);
+    }
+
+    #[test]
+    fn config_load_nonexistent() {
+        let config = Config::load(Some("/tmp/queuepeek-nonexistent-config-12345.toml"));
+        // Should return default config, not error
+        assert!(config.profiles.is_empty());
+    }
+}

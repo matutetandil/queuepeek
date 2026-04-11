@@ -63,3 +63,88 @@ pub fn compute_comparison(queue_a: &str, queue_b: &str, messages_a: Vec<MessageI
         in_both,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::backend::MessageInfo;
+
+    fn msg(body: &str) -> MessageInfo {
+        MessageInfo {
+            index: 1,
+            routing_key: String::new(),
+            exchange: String::new(),
+            redelivered: false,
+            timestamp: None,
+            content_type: String::new(),
+            headers: vec![],
+            body: body.to_string(),
+        }
+    }
+
+    #[test]
+    fn identical_queues() {
+        let a = vec![msg("hello"), msg("world")];
+        let b = vec![msg("hello"), msg("world")];
+        let result = compute_comparison("A", "B", a, b);
+        assert_eq!(result.in_both, 2);
+        assert!(result.only_in_a.is_empty());
+        assert!(result.only_in_b.is_empty());
+    }
+
+    #[test]
+    fn completely_disjoint() {
+        let a = vec![msg("aaa"), msg("bbb")];
+        let b = vec![msg("ccc"), msg("ddd")];
+        let result = compute_comparison("A", "B", a, b);
+        assert_eq!(result.in_both, 0);
+        assert_eq!(result.only_in_a.len(), 2);
+        assert_eq!(result.only_in_b.len(), 2);
+    }
+
+    #[test]
+    fn partial_overlap() {
+        let a = vec![msg("shared"), msg("only-a")];
+        let b = vec![msg("shared"), msg("only-b")];
+        let result = compute_comparison("A", "B", a, b);
+        assert_eq!(result.in_both, 1);
+        assert_eq!(result.only_in_a.len(), 1);
+        assert_eq!(result.only_in_b.len(), 1);
+        assert_eq!(result.only_in_a[0].body, "only-a");
+        assert_eq!(result.only_in_b[0].body, "only-b");
+    }
+
+    #[test]
+    fn empty_queues() {
+        let result = compute_comparison("A", "B", vec![], vec![]);
+        assert_eq!(result.in_both, 0);
+        assert!(result.only_in_a.is_empty());
+        assert!(result.only_in_b.is_empty());
+    }
+
+    #[test]
+    fn one_empty() {
+        let a = vec![msg("hello")];
+        let result = compute_comparison("A", "B", a, vec![]);
+        assert_eq!(result.in_both, 0);
+        assert_eq!(result.only_in_a.len(), 1);
+        assert!(result.only_in_b.is_empty());
+    }
+
+    #[test]
+    fn duplicates_in_one_queue() {
+        let a = vec![msg("dup"), msg("dup"), msg("unique")];
+        let b = vec![msg("dup")];
+        let result = compute_comparison("A", "B", a, b);
+        assert_eq!(result.in_both, 1);
+        assert_eq!(result.only_in_a.len(), 2); // one dup + unique
+        assert!(result.only_in_b.is_empty());
+    }
+
+    #[test]
+    fn queue_names_preserved() {
+        let result = compute_comparison("queue-1", "queue-2", vec![], vec![]);
+        assert_eq!(result.queue_a, "queue-1");
+        assert_eq!(result.queue_b, "queue-2");
+    }
+}

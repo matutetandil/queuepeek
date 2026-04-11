@@ -326,6 +326,237 @@ fn decode_protobuf_raw(data: &[u8]) -> serde_json::Value {
     serde_json::Value::Object(fields)
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // --- decode_varint ---
+
+    #[test]
+    fn varint_single_byte() {
+        let (val, consumed) = decode_varint(&[0x05]).unwrap();
+        assert_eq!(val, 5);
+        assert_eq!(consumed, 1);
+    }
+
+    #[test]
+    fn varint_zero() {
+        let (val, consumed) = decode_varint(&[0x00]).unwrap();
+        assert_eq!(val, 0);
+        assert_eq!(consumed, 1);
+    }
+
+    #[test]
+    fn varint_multi_byte() {
+        // 300 = 0b100101100 -> varint bytes: 0xAC 0x02
+        let (val, consumed) = decode_varint(&[0xAC, 0x02]).unwrap();
+        assert_eq!(val, 300);
+        assert_eq!(consumed, 2);
+    }
+
+    #[test]
+    fn varint_large() {
+        // 150 = 0x96 0x01
+        let (val, consumed) = decode_varint(&[0x96, 0x01]).unwrap();
+        assert_eq!(val, 150);
+        assert_eq!(consumed, 2);
+    }
+
+    #[test]
+    fn varint_empty_input() {
+        assert!(decode_varint(&[]).is_err());
+    }
+
+    // --- skip_protobuf_message_indexes ---
+
+    #[test]
+    fn skip_indexes_zero_count() {
+        // count=0 means first message type, no indexes
+        let data = [0x00, 0xAA, 0xBB]; // varint 0, then payload
+        let result = skip_protobuf_message_indexes(&data).unwrap();
+        assert_eq!(result, &[0xAA, 0xBB]);
+    }
+
+    #[test]
+    fn skip_indexes_one_index() {
+        // count=1, then one varint index (value 2)
+        let data = [0x01, 0x02, 0xFF, 0xEE]; // count=1, index=2, then payload
+        let result = skip_protobuf_message_indexes(&data).unwrap();
+        assert_eq!(result, &[0xFF, 0xEE]);
+    }
+
+    #[test]
+    fn skip_indexes_two_indexes() {
+        // count=2, index=0, index=1, then payload
+        let data = [0x02, 0x00, 0x01, 0xDD];
+        let result = skip_protobuf_message_indexes(&data).unwrap();
+        assert_eq!(result, &[0xDD]);
+    }
+
+    // --- decode_protobuf_raw ---
+
+    #[test]
+    fn decode_varint_field() {
+        // field 1, wire type 0 (varint), value 150
+        let data = [0x08, 0x96, 0x01]; // tag=0x08 (field 1, wire 0), value=150
+        let result = decode_protobuf_raw(&data);
+        let obj = result.as_object().unwrap();
+        assert_eq!(obj["field_1"], 150);
+    }
+
+    #[test]
+    fn decode_string_field() {
+        // field 2, wire type 2 (length-delimited), "hello"
+        let mut data = vec![0x12, 0x05]; // tag=0x12 (field 2, wire 2), len=5
+        data.extend_from_slice(b"hello");
+        let result = decode_protobuf_raw(&data);
+        let obj = result.as_object().unwrap();
+        assert_eq!(obj["field_2"], "hello");
+    }
+
+    #[test]
+    fn decode_multiple_fields() {
+        // field 1 varint 42, field 2 string "test"
+        let mut data = vec![
+            0x08, 42,          // field 1, wire 0, value=42
+            0x12, 0x04,        // field 2, wire 2, len=4
+        ];
+        data.extend_from_slice(b"test");
+        let result = decode_protobuf_raw(&data);
+        let obj = result.as_object().unwrap();
+        assert_eq!(obj["field_1"], 42);
+        assert_eq!(obj["field_2"], "test");
+    }
+
+    #[test]
+    fn decode_fixed32_field() {
+        // field 5, wire type 5 (32-bit), value 1 as u32
+        let mut data = vec![0x2D]; // tag = (5 << 3) | 5 = 0x2D
+        data.extend_from_slice(&1u32.to_le_bytes());
+        let result = decode_protobuf_raw(&data);
+        let obj = result.as_object().unwrap();
+        assert!(obj.contains_key("field_5"));
+    }
+
+    #[test]
+    fn decode_fixed64_field() {
+        // field 3, wire type 1 (64-bit), value 1 as u64
+        let mut data = vec![0x19]; // tag = (3 << 3) | 1 = 0x19
+        data.extend_from_slice(&1u64.to_le_bytes());
+        let result = decode_protobuf_raw(&data);
+        let obj = result.as_object().unwrap();
+        assert!(obj.contains_key("field_3"));
+    }
+
+    #[test]
+    fn decode_repeated_fields() {
+        // Two field 1 varints: 10, 20
+        let data = vec![0x08, 10, 0x08, 20];
+        let result = decode_protobuf_raw(&data);
+        let obj = result.as_object().unwrap();
+        let arr = obj["field_1"].as_array().unwrap();
+        assert_eq!(arr.len(), 2);
+        assert_eq!(arr[0], 10);
+        assert_eq!(arr[1], 20);
+    }
+
+    #[test]
+    fn decode_empty_payload() {
+        let result = decode_protobuf_raw(&[]);
+        assert!(result.as_object().unwrap().is_empty());
+    }
+
+    #[test]
+    fn decode_nested_message() {
+        // field 1 = string "outer", field 2 = embedded message { field 1 = varint 99 }
+        let inner = vec![0x08, 99]; // field 1, varint 99
+        let mut data = vec![
+            0x0A, 0x05, // field 1, wire 2, len 5
+        ];
+        data.extend_from_slice(b"outer");
+        data.push(0x12); // field 2, wire 2
+        data.push(inner.len() as u8);
+        data.extend_from_slice(&inner);
+        let result = decode_protobuf_raw(&data);
+        let obj = result.as_object().unwrap();
+        assert_eq!(obj["field_1"], "outer");
+        // field_2 should be decoded as nested (since inner bytes aren't valid UTF-8 text)
+        // Actually inner bytes [0x08, 99] are valid ASCII, but contain control char 0x08
+        // So it should try nested decode
+        assert!(obj.contains_key("field_2"));
+    }
+
+    // --- avro_value_to_json ---
+
+    #[test]
+    fn avro_null() {
+        let result = avro_value_to_json(&apache_avro::types::Value::Null);
+        assert!(result.is_null());
+    }
+
+    #[test]
+    fn avro_boolean() {
+        let result = avro_value_to_json(&apache_avro::types::Value::Boolean(true));
+        assert_eq!(result, true);
+    }
+
+    #[test]
+    fn avro_string() {
+        let result = avro_value_to_json(&apache_avro::types::Value::String("hello".to_string()));
+        assert_eq!(result, "hello");
+    }
+
+    #[test]
+    fn avro_int() {
+        let result = avro_value_to_json(&apache_avro::types::Value::Int(42));
+        assert_eq!(result, 42);
+    }
+
+    #[test]
+    fn avro_long() {
+        let result = avro_value_to_json(&apache_avro::types::Value::Long(1234567890));
+        assert_eq!(result, 1234567890i64);
+    }
+
+    #[test]
+    fn avro_record() {
+        let record = apache_avro::types::Value::Record(vec![
+            ("name".to_string(), apache_avro::types::Value::String("alice".to_string())),
+            ("age".to_string(), apache_avro::types::Value::Int(30)),
+        ]);
+        let result = avro_value_to_json(&record);
+        let obj = result.as_object().unwrap();
+        assert_eq!(obj["name"], "alice");
+        assert_eq!(obj["age"], 30);
+    }
+
+    #[test]
+    fn avro_array() {
+        let arr = apache_avro::types::Value::Array(vec![
+            apache_avro::types::Value::Int(1),
+            apache_avro::types::Value::Int(2),
+            apache_avro::types::Value::Int(3),
+        ]);
+        let result = avro_value_to_json(&arr);
+        let arr = result.as_array().unwrap();
+        assert_eq!(arr, &[1, 2, 3]);
+    }
+
+    #[test]
+    fn avro_union() {
+        let union_val = apache_avro::types::Value::Union(0, Box::new(apache_avro::types::Value::String("inner".to_string())));
+        let result = avro_value_to_json(&union_val);
+        assert_eq!(result, "inner");
+    }
+
+    #[test]
+    fn avro_enum() {
+        let enum_val = apache_avro::types::Value::Enum(1, "ACTIVE".to_string());
+        let result = avro_value_to_json(&enum_val);
+        assert_eq!(result, "ACTIVE");
+    }
+}
+
 fn avro_value_to_json(value: &apache_avro::types::Value) -> serde_json::Value {
     use apache_avro::types::Value;
     match value {
