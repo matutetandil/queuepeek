@@ -1,6 +1,6 @@
 # Keyboard shortcuts
 
-Global: `Ctrl+C` quits from any screen. `U` triggers auto-update when available.
+Global: `Ctrl+C` quits from any screen. `Shift+U` triggers auto-update when available.
 
 ## Profile screen
 
@@ -26,20 +26,20 @@ Global: `Ctrl+C` quits from any screen. `U` triggers auto-update when available.
 | `+` / `-` | Adjust fetch count by 10 |
 | `v` | Switch namespace/vhost |
 | `p` | Switch profile |
-| `P` | Publish message |
+| `Shift+P` | Publish message |
 | `x` | Purge queue (with confirmation) |
-| `D` | Delete queue/topic (with confirmation) |
-| `C` | Copy all messages to another queue |
+| `Shift+D` | Delete queue/topic (with confirmation) |
+| `Shift+C` | Copy all messages to another queue |
 | `m` | Move all messages to another queue |
 | `=` | Compare with another queue (diff) |
 | `i` | Queue info popup (stats, config, rates) |
-| `G` | Consumer groups (Kafka) |
-| `X` | Topology view (RabbitMQ) |
+| `Shift+G` | Consumer groups (Kafka) |
+| `Shift+X` | Topology view (RabbitMQ) |
 | `F5` | Benchmark / load test |
-| `S` | View scheduled messages |
-| `H` | Retained messages (MQTT only) |
-| `A` | ACL / permissions |
-| `W` | Webhook alert config |
+| `Shift+S` | View scheduled messages |
+| `Shift+H` | Retained messages (MQTT only) |
+| `Shift+A` | ACL / permissions |
+| `Shift+W` | Webhook alert config |
 | `t` | Theme picker |
 | `Esc` | Back to profiles |
 | `q` | Quit |
@@ -52,25 +52,25 @@ Global: `Ctrl+C` quits from any screen. `U` triggers auto-update when available.
 | `Enter` | Open message detail |
 | `/` | Filter messages |
 | `Tab` | Toggle simple/advanced filter (in filter mode) |
-| `B` | Load saved filter |
+| `Shift+B` | Load saved filter |
 | `Ctrl+B` | Save current filter |
 | `Space` | Toggle selection on current message |
 | `a` | Select/deselect all |
 | `r` | Refresh messages |
 | `f` | Fetch count picker |
-| `P` | Publish message |
-| `C` | Copy selected to another queue |
-| `M` | Move selected to another queue |
-| `D` | Delete selected (with confirmation) |
+| `Shift+P` | Publish message |
+| `Shift+C` | Copy selected to another queue |
+| `Shift+M` | Move selected to another queue |
+| `Shift+D` | Delete selected (with confirmation) |
 | `d` | Diff two selected messages side-by-side |
 | `e` | Export selected to JSON file |
-| `R` | Re-publish selected to same queue |
-| `W` | Dump entire queue to JSONL |
-| `I` | Import from JSONL/JSON file |
-| `L` | DLQ re-route (x-death header) |
-| `T` | Toggle tail mode (auto-refresh) |
-| `Y` | Replay from offset range (Kafka) |
-| `S` | View scheduled messages |
+| `Shift+R` | Re-publish selected to same queue |
+| `Shift+W` | Dump entire queue to JSONL |
+| `Shift+I` | Import from JSONL/JSON file |
+| `Shift+L` | DLQ re-route (x-death header) |
+| `Shift+T` | Toggle tail mode (auto-refresh) |
+| `Shift+Y` | Replay from offset range (Kafka) |
+| `Shift+S` | View scheduled messages |
 | `Esc` | Clear selection / back to queue list |
 | `q` | Quit |
 
@@ -85,8 +85,8 @@ Global: `Ctrl+C` quits from any screen. `U` triggers auto-update when available.
 | `s` | Toggle Schema Registry decode |
 | `c` | Copy payload to clipboard |
 | `h` | Copy headers to clipboard |
-| `E` | Edit & re-publish |
-| `L` | DLQ re-route |
+| `Shift+E` | Edit & re-publish |
+| `Shift+L` | DLQ re-route |
 | `Esc` | Back to message list |
 | `q` | Quit |
 
@@ -106,7 +106,7 @@ Global: `Ctrl+C` quits from any screen. `U` triggers auto-update when available.
 | Key | Action |
 |-----|--------|
 | `j` / `k` | Navigate groups |
-| `R` | Reset offsets for selected group |
+| `Shift+R` | Reset offsets for selected group |
 
 ### Queue comparison results
 | Key | Action |
@@ -120,11 +120,11 @@ Global: `Ctrl+C` quits from any screen. `U` triggers auto-update when available.
 | `a` | Add new alert |
 | `Enter` | Toggle enabled/disabled |
 | `d` | Delete alert |
-| `L` | View alert log |
+| `Shift+L` | View alert log |
 
 ### Retained messages (MQTT)
 | Key | Action |
 |-----|--------|
 | `j` / `k` | Navigate |
-| `D` | Clear retained message |
+| `Shift+D` | Clear retained message |
 | `c` | Copy body to clipboard |

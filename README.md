@@ -65,14 +65,14 @@ See the [full configuration guide](docs/configuration.md) for TLS, MQTT topics, 
 | `j/k` | Navigate | Navigate | Scroll |
 | `Enter` | Open queue | Open message | — |
 | `/` | Filter | Filter | — |
-| `P` | Publish | Publish | — |
+| `Shift+P` | Publish | Publish | — |
 | `p` | — | — | Pretty-print |
 | `b` | — | — | Base64/gzip decode |
 | `s` | — | — | Schema Registry decode |
 | `Space` | — | Toggle select | — |
 | `i` | Queue info | — | — |
-| `G` | Consumer groups | — | — |
-| `X` | Topology | — | — |
+| `Shift+G` | Consumer groups | — | — |
+| `Shift+X` | Topology | — | — |
 | `F5` | Benchmark | — | — |
 | `Esc` | Back | Back/clear | Back |
 

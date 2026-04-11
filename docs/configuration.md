@@ -82,7 +82,7 @@ enabled     = true
 queues      = []  # empty = all queues
 ```
 
-Manage alerts with `W` on the queue list. Alerts check every 30 seconds with hash-based deduplication.
+Manage alerts with `Shift+W` on the queue list. Alerts check every 30 seconds with hash-based deduplication.
 
 The webhook POST body:
 ```json
@@ -96,7 +96,7 @@ The webhook POST body:
 
 ## Saved filters
 
-Named filter expressions are saved per queue. Use `Ctrl+B` in the message list to save, `B` to load. Stored in `config.toml`.
+Named filter expressions are saved per queue. Use `Ctrl+B` in the message list to save, `Shift+B` to load. Stored in `config.toml`.
 
 ## Payload templates
 
@@ -113,4 +113,4 @@ Supported variables:
 
 Scheduled messages persist to `~/.config/queuepeek/scheduled.json`. They survive restarts — past-due messages fire immediately on startup.
 
-Use `Ctrl+S` in the publish popup to schedule with a delay, `S` on queue/message list to view pending.
+Use `Ctrl+S` in the publish popup to schedule with a delay, `Shift+S` on queue/message list to view pending.

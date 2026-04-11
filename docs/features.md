@@ -7,16 +7,16 @@ The UI follows a four-screen drill-down: **Profiles -> Queue list -> Message lis
 ## Message operations
 
 ### Publish
-Press `P` on queue list or message list. Multi-line body editor with routing key and content type fields. `Ctrl+Enter` sends, `Enter` in body adds newline.
+Press `Shift+P` on queue list or message list. Multi-line body editor with routing key and content type fields. `Ctrl+Enter` sends, `Enter` in body adds newline.
 
 ### Copy / Move
-`C` copies all messages from one queue to another (non-destructive). `m` moves (destructive consume + publish). Both show a queue picker popup with filter. In message list, `C` and `M` operate on selected messages only.
+`Shift+C` copies all messages from one queue to another (non-destructive). `m` moves (destructive consume + publish). Both show a queue picker popup with filter. In message list, `Shift+C` and `Shift+M` operate on selected messages only.
 
 ### Delete selected
-`D` in message list deletes selected messages via a consume-all → filter → re-publish strategy. A temp file backup is created for recovery on failure.
+`Shift+D` in message list deletes selected messages via a consume-all → filter → re-publish strategy. A temp file backup is created for recovery on failure.
 
 ### Export / Import
-`e` exports selected messages to a pretty JSON file. `W` dumps the entire queue to a JSONL file (streaming, low memory). `I` imports from JSONL or JSON array files.
+`e` exports selected messages to a pretty JSON file. `Shift+W` dumps the entire queue to a JSONL file (streaming, low memory). `Shift+I` imports from JSONL or JSON array files.
 
 ### Diff
 Select exactly 2 messages with `Space`, press `d`. Side-by-side colored diff using LCS algorithm. Headers compared field-by-field, bodies compared line-by-line.
@@ -43,24 +43,24 @@ Wire format: magic byte `0x00` + 4-byte schema ID (big-endian) + payload. Schema
 `i` shows a scrollable popup with stats, rates (with horizontal bar charts), configuration, and backend-specific details. Auto-refreshes every 5 seconds.
 
 ### Purge / Delete
-`x` purges all messages. `D` deletes the queue/topic entirely. Both require confirmation. Kafka purge works by deleting and recreating the topic.
+`x` purges all messages. `Shift+D` deletes the queue/topic entirely. Both require confirmation. Kafka purge works by deleting and recreating the topic.
 
 ### Compare
 `=` picks a second queue and computes a diff — shows messages in both, only in A, only in B. Tabbed popup with summary.
 
 ### Topology (RabbitMQ)
-`X` shows a tree view of exchanges -> bindings -> queues with routing keys.
+`Shift+X` shows a tree view of exchanges -> bindings -> queues with routing keys.
 
 ## Kafka-specific
 
 ### Consumer groups
-`G` shows groups with state, member count, total lag, and per-partition offset/lag table. Lag color-coded (red > 0, green = 0).
+`Shift+G` shows groups with state, member count, total lag, and per-partition offset/lag table. Lag color-coded (red > 0, green = 0).
 
 ### Offset reset
-`R` in consumer groups popup. Strategies: Earliest, Latest, To Timestamp, To Offset. Only for inactive (non-Stable) groups.
+`Shift+R` in consumer groups popup. Strategies: Earliest, Latest, To Timestamp, To Offset. Only for inactive (non-Stable) groups.
 
 ### Message replay
-`Y` replays messages from an offset range to a destination topic.
+`Shift+Y` replays messages from an offset range to a destination topic.
 
 ## Monitoring
 
@@ -68,10 +68,10 @@ Wire format: magic byte `0x00` + 4-byte schema ID (big-endian) + payload. Schema
 Queue list shows inline unicode sparklines for publish rate history (last 60 data points, ~5 minutes).
 
 ### Tail mode
-`T` enables auto-refresh on the message list (every 5 seconds). `[live]` indicator shown in header.
+`Shift+T` enables auto-refresh on the message list (every 5 seconds). `[live]` indicator shown in header.
 
 ### Webhook alerts
-`W` configures regex-based alerts. When a message matches, an HTTP POST is sent to the configured URL. Alerts deduplicated by content hash. Alert log accessible via `L` in the alert config popup.
+`Shift+W` configures regex-based alerts. When a message matches, an HTTP POST is sent to the configured URL. Alerts deduplicated by content hash. Alert log accessible via `Shift+L` in the alert config popup.
 
 ## Benchmarking
 
@@ -79,19 +79,19 @@ Queue list shows inline unicode sparklines for publish rate history (last 60 dat
 
 ## Scheduling
 
-`Ctrl+S` in the publish popup schedules a message with a delay (presets: 30s to 1h). Scheduled messages persist to disk and survive restarts. `S` shows pending messages with countdown timers.
+`Ctrl+S` in the publish popup schedules a message with a delay (presets: 30s to 1h). Scheduled messages persist to disk and survive restarts. `Shift+S` shows pending messages with countdown timers.
 
 ## DLQ workflows
 
-`L` parses `x-death` headers from dead-lettered messages, shows the original exchange and routing key, and re-publishes with one confirmation. Strips x-death headers from re-routed messages.
+`Shift+L` parses `x-death` headers from dead-lettered messages, shows the original exchange and routing key, and re-publishes with one confirmation. Strips x-death headers from re-routed messages.
 
 ## MQTT retained messages
 
-`H` on queue list (MQTT only) scans for retained messages via wildcard subscription. `D` clears a retained message by publishing an empty payload with the retain flag.
+`Shift+H` on queue list (MQTT only) scans for retained messages via wildcard subscription. `Shift+D` clears a retained message by publishing an empty payload with the retain flag.
 
 ## ACL / Permissions
 
-`A` shows a scrollable, color-coded permission table. RabbitMQ queries the Management API; Kafka shows broker security configs.
+`Shift+A` shows a scrollable, color-coded permission table. RabbitMQ queries the Management API; Kafka shows broker security configs.
 
 ## Themes
 
