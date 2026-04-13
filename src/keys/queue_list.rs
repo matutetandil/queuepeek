@@ -8,8 +8,14 @@ pub fn handle_queue_list_key(app: &mut App, code: KeyCode, modifiers: KeyModifie
         return;
     }
 
-    if app.queue_filter_active {
+    if app.queue_filter_active && app.queue_filter_focused {
         handle_queue_filter_key(app, code);
+        return;
+    }
+
+    // Shift+Tab returns focus to the filter input when filter is active
+    if app.queue_filter_active && code == KeyCode::BackTab {
+        app.queue_filter_focused = true;
         return;
     }
 
@@ -48,6 +54,7 @@ pub fn handle_queue_list_key(app: &mut App, code: KeyCode, modifiers: KeyModifie
         }
         KeyCode::Char('/') => {
             app.queue_filter_active = true;
+            app.queue_filter_focused = true;
         }
         KeyCode::Char('r') | KeyCode::Char('R') => {
             app.loading = true;
@@ -65,14 +72,21 @@ pub fn handle_queue_list_key(app: &mut App, code: KeyCode, modifiers: KeyModifie
             app.popup_list_state.select(Some(0));
         }
         KeyCode::Esc => {
-            app.screen = Screen::ProfileSelect;
-            app.backend = None;
-            app.queues.clear();
-            app.filtered_queue_indices.clear();
-            app.messages.clear();
-            app.current_queue_name.clear();
-            app.queue_filter.clear();
-            app.set_status(String::new(), false);
+            if app.queue_filter_active {
+                app.queue_filter.clear();
+                app.queue_filter_active = false;
+                app.queue_filter_focused = false;
+                app.update_filtered_queues();
+            } else {
+                app.screen = Screen::ProfileSelect;
+                app.backend = None;
+                app.queues.clear();
+                app.filtered_queue_indices.clear();
+                app.messages.clear();
+                app.current_queue_name.clear();
+                app.queue_filter.clear();
+                app.set_status(String::new(), false);
+            }
         }
         KeyCode::Char('f') => {
             app.popup = Popup::FetchCount;
@@ -221,16 +235,20 @@ fn handle_queue_filter_key(app: &mut App, code: KeyCode) {
                 app.queue_list_state.select(Some(0));
             }
         }
-        KeyCode::Down => {
+        KeyCode::Tab | KeyCode::Down => {
+            // Move focus to the list, keep filter active
+            app.queue_filter_focused = false;
             let len = app.filtered_queue_indices.len();
             if len > 0 {
                 let i = app.queue_list_state.selected().unwrap_or(0);
-                if i + 1 < len {
+                if code == KeyCode::Down && i + 1 < len {
                     app.queue_list_state.select(Some(i + 1));
                 }
             }
         }
         KeyCode::Up => {
+            // Move focus to the list, keep filter active
+            app.queue_filter_focused = false;
             let i = app.queue_list_state.selected().unwrap_or(0);
             if i > 0 {
                 app.queue_list_state.select(Some(i - 1));
@@ -242,6 +260,7 @@ fn handle_queue_filter_key(app: &mut App, code: KeyCode) {
                     let idx = app.filtered_queue_indices[selected];
                     app.current_queue_name = app.queues[idx].name.clone();
                     app.queue_filter_active = false;
+                    app.queue_filter_focused = false;
                     app.screen = Screen::MessageList;
                     app.message_list_state.select(Some(0));
                     app.loading = true;
@@ -251,9 +270,13 @@ fn handle_queue_filter_key(app: &mut App, code: KeyCode) {
             }
         }
         KeyCode::Esc => {
-            app.queue_filter.clear();
-            app.queue_filter_active = false;
-            app.update_filtered_queues();
+            if app.queue_filter.is_empty() {
+                app.queue_filter_active = false;
+                app.queue_filter_focused = false;
+            } else {
+                // First Esc: just unfocus to browse the filtered list
+                app.queue_filter_focused = false;
+            }
         }
         _ => {}
     }

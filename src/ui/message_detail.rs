@@ -484,18 +484,27 @@ fn decode_payload(body: &str) -> (String, &'static str) {
 fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
     let ks = Style::default().fg(app.theme.accent).bg(app.theme.sidebar_bg);
     let ds = Style::default().fg(app.theme.muted).bg(app.theme.sidebar_bg);
+    let bt = app.current_backend_type();
     let mut spans = vec![
         Span::styled("  j/k", ks), Span::styled(":scroll ", ds),
         Span::styled("p", ks), Span::styled(":pretty ", ds),
         Span::styled("b", ks), Span::styled(":decode ", ds),
-        Span::styled("s", ks), Span::styled(":schema ", ds),
+    ];
+    if app.schema_client.is_some() {
+        spans.extend([Span::styled("s", ks), Span::styled(":schema ", ds)]);
+    }
+    spans.extend([
         Span::styled("c", ks), Span::styled(":copy payload ", ds),
         Span::styled("h", ks), Span::styled(":copy headers ", ds),
         Span::styled("E", ks), Span::styled(":edit ", ds),
-        Span::styled("L", ks), Span::styled(":reroute ", ds),
+    ]);
+    if bt == "rabbitmq" {
+        spans.extend([Span::styled("L", ks), Span::styled(":reroute ", ds)]);
+    }
+    spans.extend([
         Span::styled("esc", ks), Span::styled(":back ", ds),
         Span::styled("q", ks), Span::styled(":quit", ds),
-    ];
+    ]);
     spans.extend(super::update_hint_spans(app));
     let footer = Line::from(spans);
     let bar = Paragraph::new(footer)

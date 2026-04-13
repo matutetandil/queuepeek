@@ -77,8 +77,9 @@ fn draw_list(frame: &mut Frame, app: &mut App, area: Rect) {
     let border_color = app.theme.accent;
 
     let filter_mode = if app.message_filter_advanced { "adv" } else { "filter" };
+    let cursor = if app.message_filter_focused { "▎" } else { "" };
     let title = if app.message_filter_active || !app.message_filter.is_empty() {
-        format!(" Messages ({}: {}) ", filter_mode, app.message_filter)
+        format!(" Messages ({}: {}{}) ", filter_mode, app.message_filter, cursor)
     } else {
         " Messages ".to_string()
     };
@@ -217,6 +218,7 @@ fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
         String::new()
     };
 
+    let bt = app.current_backend_type();
     let mut spans = vec![
         Span::styled(" ", Style::default()),
         Span::styled("spc", ks),
@@ -231,21 +233,22 @@ fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
         Span::styled(":del ", ds),
         Span::styled("e", ks),
         Span::styled(":export ", ds),
-        Span::styled("R", ks),
-        Span::styled(":resend ", ds),
         Span::styled("W", ks),
         Span::styled(":dump ", ds),
         Span::styled("I", ks),
         Span::styled(":import ", ds),
-        Span::styled("L", ks),
-        Span::styled(":reroute ", ds),
-        Span::styled("T", ks),
-        Span::styled(":tail ", ds),
-        Span::styled("r", ks),
-        Span::styled(":refresh ", ds),
-        Span::styled("?", ks),
-        Span::styled(":help", ds),
     ];
+    if bt == "rabbitmq" {
+        spans.extend([Span::styled("L", ks), Span::styled(":reroute ", ds)]);
+    }
+    if bt == "kafka" {
+        spans.extend([Span::styled("Y", ks), Span::styled(":replay ", ds)]);
+    }
+    spans.extend([
+        Span::styled("T", ks), Span::styled(":tail ", ds),
+        Span::styled("r", ks), Span::styled(":refresh ", ds),
+        Span::styled("?", ks), Span::styled(":help", ds),
+    ]);
     if !sel_info.is_empty() {
         spans.push(Span::styled(sel_info, Style::default().fg(app.theme.success).bold()));
     }

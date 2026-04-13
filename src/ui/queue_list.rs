@@ -59,13 +59,16 @@ fn draw_header(frame: &mut Frame, app: &App, area: Rect) {
 
 fn draw_filter(frame: &mut Frame, app: &App, area: Rect) {
     let line = if app.queue_filter_active || !app.queue_filter.is_empty() {
+        let cursor = if app.queue_filter_focused { "▎" } else { "" };
+        let slash_style = if app.queue_filter_focused {
+            Style::default().fg(app.theme.accent).bold()
+        } else {
+            Style::default().fg(app.theme.muted)
+        };
         Line::from(vec![
+            Span::styled(" / ", slash_style),
             Span::styled(
-                " / ",
-                Style::default().fg(app.theme.accent).bold(),
-            ),
-            Span::styled(
-                format!("{}▎", app.queue_filter),
+                format!("{}{}", app.queue_filter, cursor),
                 Style::default().fg(app.theme.primary),
             ),
         ])
@@ -231,6 +234,7 @@ fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
         ("", app.theme.muted)
     };
 
+    let bt = app.current_backend_type();
     let mut spans = vec![
         Span::styled(" ", Style::default()),
         Span::styled("j/k", ks),
@@ -251,11 +255,20 @@ fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
         Span::styled(":info ", ds),
         Span::styled("=", ks),
         Span::styled(":compare ", ds),
-        Span::styled("G", ks),
-        Span::styled(":groups ", ds),
-        Span::styled("?", ks),
-        Span::styled(":help", ds),
     ];
+    if bt == "kafka" {
+        spans.extend([Span::styled("G", ks), Span::styled(":groups ", ds)]);
+    }
+    if bt == "rabbitmq" {
+        spans.extend([Span::styled("X", ks), Span::styled(":topology ", ds)]);
+    }
+    if bt == "mqtt" {
+        spans.extend([Span::styled("H", ks), Span::styled(":retained ", ds)]);
+    }
+    spans.extend([
+        Span::styled("A", ks), Span::styled(":perms ", ds),
+        Span::styled("?", ks), Span::styled(":help", ds),
+    ]);
     if !app.scheduled_messages.is_empty() {
         spans.push(Span::styled(
             format!(" ⏱{} ", app.scheduled_messages.len()),

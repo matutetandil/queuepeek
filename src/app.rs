@@ -235,6 +235,7 @@ pub struct App {
     pub queue_list_state: ListState,
     pub queue_filter: String,
     pub queue_filter_active: bool,
+    pub queue_filter_focused: bool,
     pub filtered_queue_indices: Vec<usize>,
 
     // Message list screen
@@ -243,6 +244,7 @@ pub struct App {
     pub current_queue_name: String,
     pub message_filter: String,
     pub message_filter_active: bool,
+    pub message_filter_focused: bool,
     pub message_filter_advanced: bool,
     pub filtered_message_indices: Vec<usize>,
 
@@ -645,12 +647,14 @@ impl App {
             queue_list_state: ListState::default(),
             queue_filter: String::new(),
             queue_filter_active: false,
+            queue_filter_focused: false,
             filtered_queue_indices: Vec::new(),
             messages: Vec::new(),
             message_list_state: ListState::default(),
             current_queue_name: String::new(),
             message_filter: String::new(),
             message_filter_active: false,
+            message_filter_focused: false,
             message_filter_advanced: false,
             filtered_message_indices: Vec::new(),
             selected_messages: HashSet::new(),
@@ -2333,6 +2337,10 @@ impl App {
         let selected = self.message_list_state.selected()?;
         let idx = *self.filtered_message_indices.get(selected)?;
         self.messages.get(idx)
+    }
+
+    pub fn current_backend_type(&self) -> &str {
+        self.backend.as_ref().map(|b| b.backend_type()).unwrap_or("rabbitmq")
     }
 }
 

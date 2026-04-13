@@ -223,7 +223,7 @@ fn draw_profile_form(frame: &mut Frame, app: &mut App, area: Rect) {
         );
 
         // Value
-        let display_value = if i == 4 && !value.is_empty() {
+        let display_value = if i == 5 && !value.is_empty() {
             // Mask password
             "*".repeat(value.len())
         } else {

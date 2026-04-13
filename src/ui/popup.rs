@@ -80,56 +80,133 @@ fn draw_help(frame: &mut Frame, app: &App) {
     let popup_area = centered_rect(60, 70, frame.area());
     frame.render_widget(Clear, popup_area);
 
+    let bt = app.current_backend_type();
+    let screen_label = match app.screen {
+        crate::app::Screen::QueueList => "Queue List",
+        crate::app::Screen::MessageList => "Messages",
+        crate::app::Screen::MessageDetail => "Message Detail",
+        _ => "Help",
+    };
+    let backend_label = match bt {
+        "rabbitmq" => "RabbitMQ",
+        "kafka" => "Kafka",
+        "mqtt" => "MQTT",
+        _ => bt,
+    };
+
     let block = Block::bordered()
-        .title(" Keyboard Shortcuts ")
+        .title(format!(" {} — {} ", screen_label, backend_label))
         .title_style(Style::default().fg(app.theme.accent).bold())
         .border_style(Style::default().fg(app.theme.accent))
         .style(Style::default().bg(app.theme.bg));
 
-    let shortcuts = vec![
-        ("j/k ↑/↓", "Navigate lists"),
-        ("enter", "Select / open detail"),
-        ("/", "Filter"),
-        ("r", "Reload"),
-        ("v", "Switch vhost/namespace"),
-        ("p", "Switch profile"),
-        ("+/-", "Adjust fetch count"),
-        ("c", "Copy payload (detail)"),
-        ("h", "Copy headers (detail)"),
-        ("P", "Publish message"),
-        ("x", "Purge queue"),
-        ("D", "Delete queue"),
-        ("i", "Queue info (stats, config)"),
-        ("G", "Consumer groups (Kafka)"),
-        ("R", "Reset group offsets (Kafka)"),
-        ("=", "Compare two queues"),
-        ("d", "Diff two selected messages"),
-        ("b", "Toggle base64/gzip decode"),
-        ("B", "Load saved filter"),
-        ("Ctrl+B", "Save current filter"),
-        ("Ctrl+T", "Load message template"),
-        ("Ctrl+W", "Save as template"),
-        ("X", "Topology view (exchanges)"),
-        ("Y", "Replay messages (Kafka)"),
-        ("F5", "Benchmark / load test"),
-        ("C", "Copy messages to queue"),
-        ("m", "Move messages to queue"),
-        ("spc", "Select message (list)"),
-        ("a", "Select/deselect all"),
-        ("e", "Export selected to JSON"),
-        ("R", "Re-publish selected"),
-        ("W", "Dump queue to JSONL"),
-        ("I", "Import from JSONL/JSON"),
-        ("L", "DLQ re-route (x-death)"),
-        ("T", "Toggle tail / auto-refresh"),
-        ("r", "Refresh messages"),
-        ("Ctrl+S", "Schedule message (publish)"),
-        ("S", "View scheduled messages"),
-        ("E", "Edit & re-publish (detail)"),
-        ("esc", "Go back"),
-        ("?", "Toggle help"),
-        ("q", "Quit"),
-    ];
+    let mut shortcuts: Vec<(&str, &str)> = Vec::new();
+
+    match app.screen {
+        crate::app::Screen::QueueList => {
+            shortcuts.extend([
+                ("j/k ↑/↓", "Navigate queues"),
+                ("⏎", "Open queue"),
+                ("/", "Filter queues"),
+                ("r", "Reload queues"),
+                ("v", "Switch vhost/namespace"),
+                ("p", "Switch profile"),
+                ("f", "Fetch count preset"),
+                ("+/-", "Adjust fetch count"),
+                ("P", "Publish message"),
+                ("C", "Copy queue"),
+                ("m", "Move queue"),
+                ("x", "Purge queue"),
+                ("D", "Delete queue"),
+                ("i", "Queue info"),
+                ("=", "Compare two queues"),
+                ("F5", "Benchmark / load test"),
+                ("A", "Permissions / ACL"),
+                ("W", "Webhook alert config"),
+            ]);
+            match bt {
+                "kafka" => shortcuts.push(("G", "Consumer groups")),
+                "rabbitmq" => shortcuts.push(("X", "Topology view (exchanges)")),
+                "mqtt" => shortcuts.push(("H", "Retained messages")),
+                _ => {}
+            }
+            if !app.scheduled_messages.is_empty() {
+                shortcuts.push(("S", "View scheduled messages"));
+            }
+            shortcuts.extend([
+                ("esc", "Go back to profiles"),
+                ("?", "Toggle help"),
+                ("q", "Quit"),
+            ]);
+        }
+        crate::app::Screen::MessageList => {
+            shortcuts.extend([
+                ("j/k ↑/↓", "Navigate messages"),
+                ("⏎", "Open message detail"),
+                ("/", "Filter messages"),
+                ("Tab", "Toggle advanced filter (in filter)"),
+                ("spc", "Select / deselect message"),
+                ("a", "Select / deselect all"),
+                ("r", "Refresh messages"),
+                ("P", "Publish message"),
+                ("C", "Copy selected to queue"),
+                ("M", "Move selected to queue"),
+                ("D", "Delete selected"),
+                ("d", "Diff two selected messages"),
+                ("e", "Export selected to JSON"),
+                ("W", "Dump queue to JSONL"),
+                ("I", "Import from JSONL/JSON"),
+                ("T", "Toggle tail / auto-refresh"),
+                ("B", "Load saved filter"),
+                ("Ctrl+B", "Save current filter"),
+            ]);
+            if bt == "rabbitmq" {
+                shortcuts.push(("L", "DLQ re-route (x-death)"));
+            }
+            if bt == "kafka" {
+                shortcuts.push(("Y", "Replay messages"));
+            }
+            if !app.scheduled_messages.is_empty() {
+                shortcuts.push(("S", "View scheduled messages"));
+            }
+            shortcuts.extend([
+                ("f", "Fetch count preset"),
+                ("+/-", "Adjust fetch count"),
+                ("esc", "Go back to queues"),
+                ("?", "Toggle help"),
+                ("q", "Quit"),
+            ]);
+        }
+        crate::app::Screen::MessageDetail => {
+            shortcuts.extend([
+                ("j/k ↑/↓", "Scroll content"),
+                ("p", "Toggle pretty-print"),
+                ("b", "Toggle base64/gzip decode"),
+            ]);
+            if app.schema_client.is_some() {
+                shortcuts.push(("s", "Toggle schema decode"));
+            }
+            shortcuts.extend([
+                ("c", "Copy payload to clipboard"),
+                ("h", "Copy headers to clipboard"),
+                ("E", "Edit & re-publish"),
+            ]);
+            if bt == "rabbitmq" {
+                shortcuts.push(("L", "DLQ re-route (x-death)"));
+            }
+            shortcuts.extend([
+                ("esc", "Go back to messages"),
+                ("?", "Toggle help"),
+                ("q", "Quit"),
+            ]);
+        }
+        _ => {
+            shortcuts.extend([
+                ("?", "Toggle help"),
+                ("q", "Quit"),
+            ]);
+        }
+    }
 
     let mut lines: Vec<Line> = vec![Line::from("")];
     for (key, desc) in &shortcuts {

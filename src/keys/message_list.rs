@@ -8,8 +8,14 @@ pub fn handle_message_list_key(app: &mut App, code: KeyCode, modifiers: KeyModif
         return;
     }
 
-    if app.message_filter_active {
+    if app.message_filter_active && app.message_filter_focused {
         handle_message_filter_key(app, code);
+        return;
+    }
+
+    // Shift+Tab returns focus to the filter input when filter is active
+    if app.message_filter_active && code == KeyCode::BackTab {
+        app.message_filter_focused = true;
         return;
     }
 
@@ -44,6 +50,7 @@ pub fn handle_message_list_key(app: &mut App, code: KeyCode, modifiers: KeyModif
         }
         KeyCode::Char('/') => {
             app.message_filter_active = true;
+            app.message_filter_focused = true;
         }
         KeyCode::Char('r') | KeyCode::Char('R') => {
             if !app.current_queue_name.is_empty() {
@@ -189,13 +196,22 @@ pub fn handle_message_list_key(app: &mut App, code: KeyCode, modifiers: KeyModif
             }
         }
         KeyCode::Esc => {
-            if !app.selected_messages.is_empty() {
+            if app.message_filter_active {
+                app.message_filter.clear();
+                app.message_filter_active = false;
+                app.message_filter_focused = false;
+                app.update_filtered_messages();
+                if !app.filtered_message_indices.is_empty() {
+                    app.message_list_state.select(Some(0));
+                }
+            } else if !app.selected_messages.is_empty() {
                 app.selected_messages.clear();
             } else {
                 app.screen = Screen::QueueList;
                 app.messages.clear();
                 app.message_filter.clear();
                 app.message_filter_active = false;
+                app.message_filter_focused = false;
                 app.message_auto_refresh = false;
             }
         }
@@ -231,6 +247,8 @@ fn handle_message_filter_key(app: &mut App, code: KeyCode) {
             }
         }
         KeyCode::Down => {
+            // Move focus to the list, keep filter active
+            app.message_filter_focused = false;
             let len = app.filtered_message_indices.len();
             if len > 0 {
                 let i = app.message_list_state.selected().unwrap_or(0);
@@ -240,6 +258,8 @@ fn handle_message_filter_key(app: &mut App, code: KeyCode) {
             }
         }
         KeyCode::Up => {
+            // Move focus to the list, keep filter active
+            app.message_filter_focused = false;
             let i = app.message_list_state.selected().unwrap_or(0);
             if i > 0 {
                 app.message_list_state.select(Some(i - 1));
@@ -251,16 +271,18 @@ fn handle_message_filter_key(app: &mut App, code: KeyCode) {
                     app.detail_message_idx = app.filtered_message_indices[selected];
                     app.detail_scroll = 0;
                     app.message_filter_active = false;
+                    app.message_filter_focused = false;
                     app.screen = Screen::MessageDetail;
                 }
             }
         }
         KeyCode::Esc => {
-            app.message_filter.clear();
-            app.update_filtered_messages();
-            app.message_filter_active = false;
-            if !app.filtered_message_indices.is_empty() {
-                app.message_list_state.select(Some(0));
+            if app.message_filter.is_empty() {
+                app.message_filter_active = false;
+                app.message_filter_focused = false;
+            } else {
+                // First Esc: just unfocus to browse the filtered list
+                app.message_filter_focused = false;
             }
         }
         _ => {}
