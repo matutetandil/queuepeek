@@ -9,16 +9,21 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
 
     frame.render_widget(Block::default().style(Style::default().bg(app.theme.bg)), area);
 
+    let has_search_bar = app.detail_search_active || !app.detail_search_query.is_empty();
     let chunks = Layout::vertical([
         Constraint::Length(1), // header bar
         Constraint::Min(3),   // content (headers + payload)
+        if has_search_bar { Constraint::Length(1) } else { Constraint::Length(0) }, // search bar
         Constraint::Length(1), // footer
     ])
     .split(area);
 
     draw_header(frame, app, chunks[0]);
     draw_content(frame, app, chunks[1]);
-    draw_footer(frame, app, chunks[2]);
+    if has_search_bar {
+        draw_search_bar(frame, app, chunks[2]);
+    }
+    draw_footer(frame, app, chunks[3]);
 }
 
 fn draw_header(frame: &mut Frame, app: &App, area: Rect) {
@@ -181,7 +186,14 @@ fn draw_content(frame: &mut Frame, app: &mut App, area: Rect) {
         .border_style(Style::default().fg(app.theme.divider))
         .style(Style::default().bg(app.theme.bg));
 
-    let payload_paragraph = Paragraph::new(payload_text)
+    // Apply search highlighting if there's an active search query
+    let final_text = if !app.detail_search_query.is_empty() {
+        highlight_search(payload_text, &app.detail_search_query, app.theme, &app.detail_search_matches, app.detail_search_current)
+    } else {
+        payload_text
+    };
+
+    let payload_paragraph = Paragraph::new(final_text)
         .style(Style::default().bg(app.theme.bg))
         .block(payload_block)
         .wrap(Wrap { trim: false })
@@ -481,6 +493,111 @@ fn decode_payload(body: &str) -> (String, &'static str) {
     (body.to_string(), "")
 }
 
+/// Overlay search-match highlighting onto existing styled text.
+/// The current match line gets a brighter highlight.
+fn highlight_search<'a>(
+    text: Text<'a>,
+    query: &str,
+    theme: &Theme,
+    match_lines: &[u16],
+    current_match: usize,
+) -> Text<'a> {
+    let query_lower = query.to_lowercase();
+    let current_line = match_lines.get(current_match).copied();
+    let highlight_bg = theme.accent;
+    let highlight_fg = theme.bg;
+    let dim_bg = theme.muted;
+
+    let mut new_lines: Vec<Line<'a>> = Vec::new();
+
+    for (line_idx, line) in text.lines.into_iter().enumerate() {
+        let line_num = line_idx as u16;
+        let is_match_line = match_lines.contains(&line_num);
+
+        if !is_match_line {
+            new_lines.push(line);
+            continue;
+        }
+
+        let is_current = current_line == Some(line_num);
+        let (bg, fg) = if is_current {
+            (highlight_bg, highlight_fg)
+        } else {
+            (dim_bg, highlight_fg)
+        };
+
+        // Rebuild spans with highlighted occurrences of the query
+        let mut new_spans: Vec<Span<'a>> = Vec::new();
+        for span in line.spans {
+            let content = span.content.to_string();
+            let lower = content.to_lowercase();
+            let mut last = 0;
+
+            let qlen = query_lower.len();
+            while let Some(pos) = lower[last..].find(&query_lower) {
+                let abs = last + pos;
+                if abs > last {
+                    let mut pre_style = span.style;
+                    if is_current {
+                        pre_style = pre_style.bg(theme.bg);
+                    }
+                    new_spans.push(Span::styled(content[last..abs].to_string(), pre_style));
+                }
+                new_spans.push(Span::styled(
+                    content[abs..abs + qlen].to_string(),
+                    Style::default().fg(fg).bg(bg).bold(),
+                ));
+                last = abs + qlen;
+            }
+
+            if last < content.len() {
+                let mut rest_style = span.style;
+                if is_current {
+                    rest_style = rest_style.bg(theme.bg);
+                }
+                new_spans.push(Span::styled(content[last..].to_string(), rest_style));
+            } else if last == 0 {
+                // No match within this span, keep original
+                new_spans.push(span);
+            }
+        }
+
+        new_lines.push(Line::from(new_spans));
+    }
+
+    Text::from(new_lines)
+}
+
+fn draw_search_bar(frame: &mut Frame, app: &App, area: Rect) {
+    let mut spans = vec![
+        Span::styled("/", Style::default().fg(app.theme.accent).bg(app.theme.sidebar_bg)),
+        Span::styled(
+            app.detail_search_query.clone(),
+            Style::default().fg(app.theme.white).bg(app.theme.sidebar_bg),
+        ),
+    ];
+
+    if app.detail_search_active {
+        spans.push(Span::styled("▎", Style::default().fg(app.theme.accent).bg(app.theme.sidebar_bg)));
+    }
+
+    if !app.detail_search_matches.is_empty() {
+        spans.push(Span::styled(
+            format!("  {}/{}", app.detail_search_current + 1, app.detail_search_matches.len()),
+            Style::default().fg(app.theme.muted).bg(app.theme.sidebar_bg),
+        ));
+    } else if !app.detail_search_query.is_empty() && !app.detail_search_active {
+        spans.push(Span::styled(
+            "  no matches",
+            Style::default().fg(app.theme.error).bg(app.theme.sidebar_bg),
+        ));
+    }
+
+    let bar = Paragraph::new(Line::from(spans))
+        .style(Style::default().bg(app.theme.sidebar_bg));
+    frame.render_widget(bar, area);
+}
+
 fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
     let ks = Style::default().fg(app.theme.accent).bg(app.theme.sidebar_bg);
     let ds = Style::default().fg(app.theme.muted).bg(app.theme.sidebar_bg);
@@ -502,6 +619,8 @@ fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
         spans.extend([Span::styled("L", ks), Span::styled(":reroute ", ds)]);
     }
     spans.extend([
+        Span::styled("/", ks), Span::styled(":search ", ds),
+        Span::styled("n/N", ks), Span::styled(":next/prev ", ds),
         Span::styled("esc", ks), Span::styled(":back ", ds),
         Span::styled("q", ks), Span::styled(":quit", ds),
     ]);

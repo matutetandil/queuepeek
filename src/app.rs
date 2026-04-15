@@ -256,6 +256,10 @@ pub struct App {
     pub detail_scroll: u16,
     pub detail_pretty: bool,
     pub detail_decoded: bool,
+    pub detail_search_active: bool,
+    pub detail_search_query: String,
+    pub detail_search_matches: Vec<u16>,  // line numbers (0-based) with matches
+    pub detail_search_current: usize,     // index into matches
 
     // Message diff
     pub diff_messages: Option<(MessageInfo, MessageInfo)>,
@@ -662,6 +666,10 @@ impl App {
             detail_scroll: 0,
             detail_pretty: true,
             detail_decoded: false,
+            detail_search_active: false,
+            detail_search_query: String::new(),
+            detail_search_matches: Vec::new(),
+            detail_search_current: 0,
             diff_messages: None,
             diff_scroll: 0,
             fetch_count: 50,

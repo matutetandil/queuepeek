@@ -190,12 +190,15 @@ fn draw_help(frame: &mut Frame, app: &App) {
                 ("c", "Copy payload to clipboard"),
                 ("h", "Copy headers to clipboard"),
                 ("E", "Edit & re-publish"),
+                ("/", "Search in payload"),
+                ("n", "Next search match"),
+                ("N", "Previous search match"),
             ]);
             if bt == "rabbitmq" {
                 shortcuts.push(("L", "DLQ re-route (x-death)"));
             }
             shortcuts.extend([
-                ("esc", "Go back to messages"),
+                ("esc", "Clear search / go back"),
                 ("?", "Toggle help"),
                 ("q", "Quit"),
             ]);
