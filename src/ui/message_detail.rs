@@ -24,6 +24,10 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         draw_search_bar(frame, app, chunks[2]);
     }
     draw_footer(frame, app, chunks[3]);
+
+    if app.popup != crate::app::Popup::None {
+        super::popup::draw(frame, app);
+    }
 }
 
 fn draw_header(frame: &mut Frame, app: &App, area: Rect) {
