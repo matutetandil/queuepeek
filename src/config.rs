@@ -35,14 +35,6 @@ impl Profile {
         format!("{}://{}:{}", scheme, self.host, self.port)
     }
 
-    pub fn vhost_or_default(&self) -> &str {
-        self.vhost.as_deref().unwrap_or("/")
-    }
-
-    pub fn is_cloud_host(&self) -> bool {
-        let h = self.host.to_lowercase();
-        h.contains("cloudamqp.com") || h.contains("amazonaws.com") || h.contains("azure.com") || h.contains("rabbitmq.cloud")
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -176,27 +168,6 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(p.base_url(), "https://rabbit.example.com:443");
-    }
-
-    #[test]
-    fn profile_vhost_or_default() {
-        let p = Profile { vhost: None, ..Default::default() };
-        assert_eq!(p.vhost_or_default(), "/");
-
-        let p2 = Profile { vhost: Some("production".to_string()), ..Default::default() };
-        assert_eq!(p2.vhost_or_default(), "production");
-    }
-
-    #[test]
-    fn profile_is_cloud_host() {
-        let p = Profile { host: "crisp-orange.rmq6.cloudamqp.com".to_string(), ..Default::default() };
-        assert!(p.is_cloud_host());
-
-        let p2 = Profile { host: "my-rabbit.amazonaws.com".to_string(), ..Default::default() };
-        assert!(p2.is_cloud_host());
-
-        let p3 = Profile { host: "localhost".to_string(), ..Default::default() };
-        assert!(!p3.is_cloud_host());
     }
 
     #[test]

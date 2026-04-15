@@ -5,8 +5,8 @@ pub mod mqtt;
 /// Info about the connected broker
 #[derive(Debug, Clone)]
 pub struct BrokerInfo {
-    pub name: String,
-    pub cluster: String,
+    pub _name: String,
+    pub _cluster: String,
 }
 
 /// A queue/topic with basic stats
@@ -99,17 +99,17 @@ pub struct BindingInfo {
     pub source: String,
     pub destination: String,
     pub routing_key: String,
-    pub destination_type: String,
+    pub _destination_type: String,
 }
 
 /// Permission/ACL entry for a user or principal
 #[derive(Debug, Clone)]
 pub struct PermissionEntry {
     pub user_or_principal: String,
-    pub resource_type: String,
+    pub _resource_type: String,
     pub resource_name: String,
     pub permission: String,
-    pub operation: String,
+    pub _operation: String,
     pub host: String,
 }
 

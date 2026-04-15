@@ -17,7 +17,8 @@ struct QueueApiResponse {
     #[serde(default)]
     state: String,
     #[serde(default)]
-    vhost: String,
+    #[serde(rename = "vhost")]
+    _vhost: String,
     #[serde(default)]
     message_stats: Option<MessageStats>,
 }
@@ -26,7 +27,8 @@ struct QueueApiResponse {
 struct MessageStats {
     publish_details: Option<RateDetail>,
     deliver_details: Option<RateDetail>,
-    ack_details: Option<RateDetail>,
+    #[serde(rename = "ack_details")]
+    _ack_details: Option<RateDetail>,
 }
 
 #[derive(Deserialize)]
@@ -174,8 +176,8 @@ impl Backend for RabbitMqBackend {
     fn broker_info(&self) -> Result<BrokerInfo, String> {
         let resp: OverviewResponse = self.get("/api/overview")?;
         Ok(BrokerInfo {
-            name: format!("RabbitMQ {}", resp.rabbitmq_version),
-            cluster: resp.cluster_name,
+            _name: format!("RabbitMQ {}", resp.rabbitmq_version),
+            _cluster: resp.cluster_name,
         })
     }
 
@@ -592,7 +594,7 @@ impl Backend for RabbitMqBackend {
                 source: b["source"].as_str().unwrap_or("").to_string(),
                 destination: b["destination"].as_str().unwrap_or("").to_string(),
                 routing_key: b["routing_key"].as_str().unwrap_or("").to_string(),
-                destination_type: b["destination_type"].as_str().unwrap_or("queue").to_string(),
+                _destination_type: b["destination_type"].as_str().unwrap_or("queue").to_string(),
             }
         }).filter(|b| !b.source.is_empty()) // skip default exchange bindings
         .collect())
@@ -617,30 +619,30 @@ impl Backend for RabbitMqBackend {
             if !configure.is_empty() {
                 entries.push(PermissionEntry {
                     user_or_principal: user.clone(),
-                    resource_type: "vhost".to_string(),
+                    _resource_type: "vhost".to_string(),
                     resource_name: configure.clone(),
                     permission: "configure".to_string(),
-                    operation: "configure".to_string(),
+                    _operation: "configure".to_string(),
                     host: namespace.to_string(),
                 });
             }
             if !write.is_empty() {
                 entries.push(PermissionEntry {
                     user_or_principal: user.clone(),
-                    resource_type: "vhost".to_string(),
+                    _resource_type: "vhost".to_string(),
                     resource_name: write.clone(),
                     permission: "write".to_string(),
-                    operation: "write".to_string(),
+                    _operation: "write".to_string(),
                     host: namespace.to_string(),
                 });
             }
             if !read.is_empty() {
                 entries.push(PermissionEntry {
                     user_or_principal: user.clone(),
-                    resource_type: "vhost".to_string(),
+                    _resource_type: "vhost".to_string(),
                     resource_name: read.clone(),
                     permission: "read".to_string(),
-                    operation: "read".to_string(),
+                    _operation: "read".to_string(),
                     host: namespace.to_string(),
                 });
             }

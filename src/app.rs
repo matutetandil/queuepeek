@@ -33,10 +33,10 @@ pub enum BgResult {
     QueueDetail(Result<Vec<DetailSection>, String>),
     ConsumerGroups(Result<Vec<ConsumerGroupInfo>, String>),
     OffsetReset(Result<String, String>),
-    ScheduledPublished { id: u64, result: Result<(), String> },
+    ScheduledPublished { _id: u64, result: Result<(), String> },
     ReplayComplete(Result<u64, String>),
     Topology(Result<(Vec<crate::backend::ExchangeInfo>, Vec<crate::backend::BindingInfo>), String>),
-    BenchmarkProgress { completed: u32, total: u32, latency_ms: u64 },
+    BenchmarkProgress { completed: u32, total: u32, _latency_ms: u64 },
     BenchmarkComplete(BenchmarkStats),
     RetainedMessages(Result<Vec<MessageInfo>, String>),
     RetainedCleared(Result<String, String>),
@@ -74,7 +74,6 @@ pub enum Popup {
     MessageQueuePicker(QueueOperation),
     OperationProgress,
     ConfirmDeleteMessages,
-    ExportMessages,
     ImportFile,
     QueueInfo,
     EditMessage,
@@ -124,7 +123,7 @@ pub struct AlertLogEntry {
     pub timestamp: String,
     pub alert_name: String,
     pub queue: String,
-    pub matched_preview: String,
+    pub _matched_preview: String,
     pub webhook_status: String,
 }
 
@@ -186,7 +185,7 @@ pub struct ScheduledMessage {
     pub routing_key: String,
     pub content_type: String,
     pub body: String,
-    pub scheduled_at: Instant,
+    pub _scheduled_at: Instant,
     pub publish_at: Instant,
     pub delay_secs: u64,
 }
@@ -403,15 +402,6 @@ impl PublishForm {
 
     pub fn field_count() -> usize { 3 }
 
-    pub fn field_label(idx: usize) -> &'static str {
-        match idx {
-            0 => "Routing Key",
-            1 => "Content Type",
-            2 => "Body",
-            _ => "",
-        }
-    }
-
     pub fn push_char(&mut self, c: char) {
         match self.focused_field {
             0 => self.routing_key.push(c),
@@ -481,20 +471,6 @@ impl ProfileForm {
             6 => self.vhost.clone(),
             7 => if self.tls { "yes".into() } else { "no".into() },
             _ => String::new(),
-        }
-    }
-
-    pub fn set_field(&mut self, idx: usize, val: String) {
-        match idx {
-            0 => self.profile_type = val,
-            1 => self.name = val,
-            2 => self.host = val,
-            3 => self.port = val,
-            4 => self.username = val,
-            5 => self.password = val,
-            6 => self.vhost = val,
-            7 => self.tls = val == "yes",
-            _ => {}
         }
     }
 
@@ -1336,33 +1312,6 @@ impl App {
         }
     }
 
-    pub fn re_publish_selected(&self) {
-        if let Some(ref backend) = self.backend {
-            let messages = self.get_target_messages();
-            if messages.is_empty() { return; }
-
-            let backend = backend.clone_backend();
-            let namespace = self.selected_namespace.clone();
-            let queue = self.current_queue_name.clone();
-            let tx = self.bg_sender.clone();
-
-            std::thread::spawn(move || {
-                let mut ok = 0;
-                for msg in &messages {
-                    let headers: Vec<(String, String)> = msg.headers.clone();
-                    if backend.publish_message(
-                        &namespace, &queue, &msg.body, &msg.routing_key, &headers, &msg.content_type,
-                    ).is_ok() {
-                        ok += 1;
-                    }
-                }
-                let _ = tx.send(BgResult::Published(
-                    Ok(())
-                ));
-            });
-        }
-    }
-
     pub fn do_publish(&self) {
         if let Some(ref backend) = self.backend {
             let backend = backend.clone_backend();
@@ -1520,11 +1469,11 @@ impl App {
                                 }
 
                                 let done = completed.load(Ordering::Relaxed) + errors.load(Ordering::Relaxed);
-                                if done % 10 == 0 {
+                                if done.is_multiple_of(10) {
                                     let _ = tx.send(BgResult::BenchmarkProgress {
                                         completed: done,
                                         total: count,
-                                        latency_ms: latency,
+                                        _latency_ms: latency,
                                     });
                                 }
                             }
@@ -1597,7 +1546,7 @@ impl App {
             routing_key: self.publish_form.routing_key.clone(),
             content_type: self.publish_form.content_type.clone(),
             body: self.publish_form.body.clone(),
-            scheduled_at: now,
+            _scheduled_at: now,
             publish_at: now + Duration::from_secs(delay_secs),
             delay_secs,
         };
@@ -1630,7 +1579,7 @@ impl App {
                 let tx = self.bg_sender.clone();
                 std::thread::spawn(move || {
                     let result = backend.publish_message(&namespace, &queue, &body, &routing_key, &[], &content_type);
-                    let _ = tx.send(BgResult::ScheduledPublished { id, result });
+                    let _ = tx.send(BgResult::ScheduledPublished { _id: id, result });
                 });
             }
         }
@@ -1717,7 +1666,7 @@ impl App {
                 routing_key: p.routing_key,
                 content_type: p.content_type,
                 body: p.body,
-                scheduled_at: now_instant,
+                _scheduled_at: now_instant,
                 publish_at,
                 delay_secs: p.delay_secs,
             });
@@ -1849,7 +1798,7 @@ impl App {
 
     pub fn decode_message_schema(&mut self, msg_idx: usize) -> Option<&Result<crate::schema::DecodedMessage, String>> {
         if !self.schema_decode_enabled { return None; }
-        if self.schema_client.is_none() { return None; }
+        self.schema_client.as_ref()?;
 
         if !self.schema_decoded_cache.contains_key(&msg_idx) {
             if let Some(msg) = self.messages.get(msg_idx) {
@@ -2166,7 +2115,7 @@ impl App {
                     self.loading = false;
                     self.set_status(format!("Topology: {}", e), true);
                 }
-                BgResult::BenchmarkProgress { completed, total, latency_ms: _ } => {
+                BgResult::BenchmarkProgress { completed, total, _latency_ms: _ } => {
                     self.bench_progress = (completed, total);
                 }
                 BgResult::BenchmarkComplete(stats) => {
@@ -2200,7 +2149,7 @@ impl App {
                         }
                     }
                 }
-                BgResult::ScheduledPublished { id: _, result } => {
+                BgResult::ScheduledPublished { _id: _, result } => {
                     match result {
                         Ok(()) => {
                             self.set_status("Scheduled message published", false);
@@ -2289,7 +2238,7 @@ impl App {
                         timestamp: ts,
                         alert_name: alert_name.clone(),
                         queue,
-                        matched_preview: message_preview,
+                        _matched_preview: message_preview,
                         webhook_status: webhook_status.clone(),
                     });
                     if self.alert_log.len() > 100 {
@@ -2339,12 +2288,6 @@ impl App {
         let selected = self.queue_list_state.selected()?;
         let idx = *self.filtered_queue_indices.get(selected)?;
         self.queues.get(idx)
-    }
-
-    pub fn selected_message(&self) -> Option<&MessageInfo> {
-        let selected = self.message_list_state.selected()?;
-        let idx = *self.filtered_message_indices.get(selected)?;
-        self.messages.get(idx)
     }
 
     pub fn current_backend_type(&self) -> &str {

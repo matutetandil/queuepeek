@@ -87,7 +87,7 @@ pub fn dump_rabbitmq(
                 if total > 0 {
                     drop(writer);
                     let _ = tx.send(BgResult::OperationProgress { completed: total, total: 0 });
-                    republish_from_file(&backend, namespace, queue, &path, &tx, &cancel);
+                    republish_from_file(&*backend, namespace, queue, &path, &tx, &cancel);
                     let _ = tx.send(BgResult::OperationComplete(
                         Ok(format!("Dumped {} messages to {} (consume stopped: {})", total, path.display(), e))
                     ));
@@ -119,7 +119,7 @@ pub fn dump_rabbitmq(
     drop(writer);
 
     // Phase 2: re-publish all messages back to restore the queue
-    republish_from_file(&backend, namespace, queue, &path, &tx, &cancel);
+    republish_from_file(&*backend, namespace, queue, &path, &tx, &cancel);
 
     let _ = tx.send(BgResult::OperationComplete(
         Ok(format!("Dumped {} messages to {}", total, path.display()))
@@ -128,7 +128,7 @@ pub fn dump_rabbitmq(
 
 /// Re-publish all messages from a JSONL file back to the queue
 pub fn republish_from_file(
-    backend: &Box<dyn Backend>,
+    backend: &dyn Backend,
     namespace: &str,
     queue: &str,
     path: &std::path::Path,
@@ -226,8 +226,6 @@ pub fn dump_kafka(
             if empty_polls >= 2 { break; }
             continue;
         }
-        empty_polls = 0;
-
         for msg in &batch {
             let json = message_to_json(msg);
             if let Err(e) = writeln!(writer, "{}", json) {

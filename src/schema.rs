@@ -14,7 +14,7 @@ enum CachedSchema {
     Avro(apache_avro::Schema),
     Protobuf(String), // .proto text (for info display)
     Json(String),
-    RawJson(String),
+    RawJson(()),
 }
 
 pub struct DecodedMessage {
@@ -71,7 +71,7 @@ impl SchemaRegistryClient {
                 CachedSchema::Json(schema_str.to_string())
             }
             _ => {
-                CachedSchema::RawJson(schema_str.to_string())
+                CachedSchema::RawJson(())
             }
         };
 
@@ -100,7 +100,7 @@ impl SchemaRegistryClient {
 
         match cached {
             CachedSchema::Avro(schema) => {
-                let reader = apache_avro::Reader::with_schema(schema, &payload[..])
+                let reader = apache_avro::Reader::with_schema(schema, payload)
                     .map_err(|e| format!("Avro reader: {}", e));
 
                 match reader {
@@ -139,7 +139,7 @@ impl SchemaRegistryClient {
                     decoded_body: pretty,
                 })
             }
-            CachedSchema::Json(schema_str) => {
+            CachedSchema::Json(_schema_str) => {
                 // JSON schema — the payload is JSON, just validate and pretty-print
                 let val: serde_json::Value = serde_json::from_slice(payload)
                     .map_err(|e| format!("JSON decode: {}", e))?;

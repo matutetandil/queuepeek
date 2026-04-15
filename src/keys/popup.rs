@@ -182,9 +182,6 @@ pub fn handle_popup_key(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
                 }
             }
         }
-        Popup::ExportMessages => {
-            app.popup = Popup::None;
-        }
         Popup::ConsumerGroups => {
             handle_consumer_groups_key(app, code);
         }
@@ -523,11 +520,8 @@ pub fn handle_popup_key(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
             }
         }
         Popup::BenchmarkRunning => {
-            match code {
-                KeyCode::Esc => {
-                    app.operation_cancel.store(true, std::sync::atomic::Ordering::Relaxed);
-                }
-                _ => {}
+            if code == KeyCode::Esc {
+                app.operation_cancel.store(true, std::sync::atomic::Ordering::Relaxed);
             }
             if app.bench_stats.is_some() {
                 app.popup = Popup::None;

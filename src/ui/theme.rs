@@ -13,7 +13,7 @@ pub struct Theme {
     pub success: Color,
     pub white: Color,
     pub divider: Color,
-    pub status_bg: Color,
+    pub _status_bg: Color,
     pub highlight_bg: Color,
 }
 
@@ -30,7 +30,7 @@ pub const THEMES: &[Theme] = &[
         success: Color::Rgb(43, 172, 118),
         white: Color::Rgb(255, 255, 255),
         divider: Color::Rgb(61, 63, 69),
-        status_bg: Color::Rgb(30, 33, 38),
+        _status_bg: Color::Rgb(30, 33, 38),
         highlight_bg: Color::Rgb(37, 39, 41),
     },
     Theme {
@@ -45,7 +45,7 @@ pub const THEMES: &[Theme] = &[
         success: Color::Rgb(80, 250, 123),
         white: Color::Rgb(248, 248, 242),
         divider: Color::Rgb(68, 71, 90),
-        status_bg: Color::Rgb(33, 34, 44),
+        _status_bg: Color::Rgb(33, 34, 44),
         highlight_bg: Color::Rgb(68, 71, 90),
     },
     Theme {
@@ -60,7 +60,7 @@ pub const THEMES: &[Theme] = &[
         success: Color::Rgb(184, 187, 38),
         white: Color::Rgb(251, 241, 199),
         divider: Color::Rgb(80, 73, 69),
-        status_bg: Color::Rgb(29, 32, 33),
+        _status_bg: Color::Rgb(29, 32, 33),
         highlight_bg: Color::Rgb(60, 56, 54),
     },
     Theme {
@@ -75,7 +75,7 @@ pub const THEMES: &[Theme] = &[
         success: Color::Rgb(166, 227, 161),
         white: Color::Rgb(205, 214, 244),
         divider: Color::Rgb(69, 71, 90),
-        status_bg: Color::Rgb(24, 24, 37),
+        _status_bg: Color::Rgb(24, 24, 37),
         highlight_bg: Color::Rgb(49, 50, 68),
     },
     Theme {
@@ -90,7 +90,7 @@ pub const THEMES: &[Theme] = &[
         success: Color::Rgb(158, 206, 106),
         white: Color::Rgb(192, 202, 245),
         divider: Color::Rgb(59, 66, 97),
-        status_bg: Color::Rgb(22, 22, 30),
+        _status_bg: Color::Rgb(22, 22, 30),
         highlight_bg: Color::Rgb(36, 40, 59),
     },
 ];

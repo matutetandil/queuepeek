@@ -43,6 +43,10 @@ cd queuepeek && cargo build --release
 ./target/release/queuepeek
 ```
 
+### Updating
+
+queuepeek checks for updates automatically. When a new version is available, a hint appears in the status bar — press `Shift+U` to update in place.
+
 ## Configuration
 
 ```toml

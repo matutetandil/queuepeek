@@ -24,7 +24,6 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
             draw_confirm(frame, app, "Delete Messages",
                 &format!("Delete {} selected message(s)?\n\nThis consumes all messages and re-publishes\nthe ones not selected. This is destructive.", count));
         }
-        Popup::ExportMessages => {}
         Popup::ImportFile => draw_import_file(frame, app),
         Popup::QueueInfo => draw_queue_info(frame, app),
         Popup::ConsumerGroups => draw_consumer_groups(frame, app),
@@ -86,7 +85,6 @@ fn draw_help(frame: &mut Frame, app: &App) {
         crate::app::Screen::QueueList => "Queue List",
         crate::app::Screen::MessageList => "Messages",
         crate::app::Screen::MessageDetail => "Message Detail",
-        _ => "Help",
     };
     let backend_label = match bt {
         "rabbitmq" => "RabbitMQ",
@@ -226,12 +224,6 @@ fn draw_help(frame: &mut Frame, app: &App) {
                 ("e", "Edit selected profile"),
                 ("d", "Delete selected profile"),
                 ("t", "Change theme"),
-                ("?", "Toggle help"),
-                ("q", "Quit"),
-            ]);
-        }
-        _ => {
-            shortcuts.extend([
                 ("?", "Toggle help"),
                 ("q", "Quit"),
             ]);

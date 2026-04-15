@@ -53,7 +53,7 @@ pub fn resolve_field(field: &str, msg: &MessageInfo) -> String {
         "content_type" => msg.content_type.clone(),
         "redelivered" => msg.redelivered.to_string(),
         _ if field.starts_with("header.") || field.starts_with("headers.") => {
-            let key = field.splitn(2, '.').nth(1).unwrap_or("");
+            let key = field.split_once('.').map(|x| x.1).unwrap_or("");
             msg.headers.iter()
                 .find(|(k, _)| k.to_lowercase() == key.to_lowercase())
                 .map(|(_, v)| v.clone())
@@ -61,7 +61,7 @@ pub fn resolve_field(field: &str, msg: &MessageInfo) -> String {
         }
         _ if field.starts_with("body.") => {
             // JSON path lookup in body
-            let path = field.splitn(2, '.').nth(1).unwrap_or("");
+            let path = field.split_once('.').map(|x| x.1).unwrap_or("");
             if let Ok(val) = serde_json::from_str::<serde_json::Value>(&msg.body) {
                 let parts: Vec<&str> = path.split('.').collect();
                 let mut current = &val;

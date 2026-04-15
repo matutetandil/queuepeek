@@ -115,8 +115,8 @@ impl Backend for MqttBackend {
         };
 
         Ok(BrokerInfo {
-            name,
-            cluster: format!("{}:{}", self.host, self.port),
+            _name: name,
+            _cluster: format!("{}:{}", self.host, self.port),
         })
     }
 

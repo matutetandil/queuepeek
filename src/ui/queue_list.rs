@@ -153,7 +153,7 @@ fn draw_list(frame: &mut Frame, app: &mut App, area: Rect) {
             let sparkline_str = app.rate_history.get(&q.name)
                 .map(|h| h.sparkline_str(sparkline_width))
                 .unwrap_or_else(|| " ".repeat(sparkline_width));
-            let has_activity = sparkline_str.trim().len() > 0;
+            let has_activity = !sparkline_str.trim().is_empty();
 
             // Right side stats
             let right = format!("  {}{}  {}  {}  {}", msg_text, rate_text, consumers_text, q.state, sparkline_str);

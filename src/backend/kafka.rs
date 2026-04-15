@@ -96,8 +96,8 @@ impl Backend for KafkaBackend {
             .collect();
 
         Ok(BrokerInfo {
-            name: format!("Apache Kafka ({} broker{})", metadata.brokers().len(), if metadata.brokers().len() == 1 { "" } else { "s" }),
-            cluster: broker_list.join(", "),
+            _name: format!("Apache Kafka ({} broker{})", metadata.brokers().len(), if metadata.brokers().len() == 1 { "" } else { "s" }),
+            _cluster: broker_list.join(", "),
         })
     }
 
@@ -128,11 +128,8 @@ impl Backend for KafkaBackend {
             // Calculate total messages from watermarks
             let mut total_messages: u64 = 0;
             for partition in topic.partitions() {
-                match consumer.fetch_watermarks(topic_name, partition.id(), Duration::from_secs(5)) {
-                    Ok((low, high)) => {
-                        total_messages += (high - low) as u64;
-                    }
-                    Err(_) => {}
+                if let Ok((low, high)) = consumer.fetch_watermarks(topic_name, partition.id(), Duration::from_secs(5)) {
+                    total_messages += (high - low) as u64;
                 }
             }
 
@@ -642,26 +639,24 @@ impl Backend for KafkaBackend {
 
         if let Ok(configs) = config_result {
             let mut config_entries = Vec::new();
-            for config in configs {
-                if let Ok(resource) = config {
-                    // Show non-default, interesting config entries
-                    let interesting = [
-                        "retention.ms", "retention.bytes", "cleanup.policy",
-                        "compression.type", "segment.bytes", "max.message.bytes",
-                        "min.insync.replicas", "replication.factor",
-                    ];
-                    for key in &interesting {
-                        if let Some(entry) = resource.get(key) {
-                            if let Some(ref value) = entry.value {
-                                let display_value = if *key == "retention.ms" {
-                                    format_duration_ms(value)
-                                } else if *key == "segment.bytes" || *key == "retention.bytes" || *key == "max.message.bytes" {
-                                    format_config_bytes(value)
-                                } else {
-                                    value.clone()
-                                };
-                                config_entries.push(DetailEntry::kv(*key, display_value));
-                            }
+            for resource in configs.into_iter().flatten() {
+                // Show non-default, interesting config entries
+                let interesting = [
+                    "retention.ms", "retention.bytes", "cleanup.policy",
+                    "compression.type", "segment.bytes", "max.message.bytes",
+                    "min.insync.replicas", "replication.factor",
+                ];
+                for key in &interesting {
+                    if let Some(entry) = resource.get(key) {
+                        if let Some(ref value) = entry.value {
+                            let display_value = if *key == "retention.ms" {
+                                format_duration_ms(value)
+                            } else if *key == "segment.bytes" || *key == "retention.bytes" || *key == "max.message.bytes" {
+                                format_config_bytes(value)
+                            } else {
+                                value.clone()
+                            };
+                            config_entries.push(DetailEntry::kv(*key, display_value));
                         }
                     }
                 }
@@ -820,20 +815,20 @@ impl Backend for KafkaBackend {
 
         entries.push(PermissionEntry {
             user_or_principal: if self.username.is_empty() { "anonymous".to_string() } else { self.username.clone() },
-            resource_type: "broker".to_string(),
+            _resource_type: "broker".to_string(),
             resource_name: self.broker.clone(),
             permission: protocol.to_string(),
-            operation: "connect".to_string(),
+            _operation: "connect".to_string(),
             host: "*".to_string(),
         });
 
         if !self.username.is_empty() {
             entries.push(PermissionEntry {
                 user_or_principal: self.username.clone(),
-                resource_type: "broker".to_string(),
+                _resource_type: "broker".to_string(),
                 resource_name: "SASL/PLAIN".to_string(),
                 permission: "authenticated".to_string(),
-                operation: "sasl".to_string(),
+                _operation: "sasl".to_string(),
                 host: self.broker.clone(),
             });
         }
@@ -867,10 +862,10 @@ impl Backend for KafkaBackend {
                         {
                             entries.push(PermissionEntry {
                                 user_or_principal: "(broker config)".to_string(),
-                                resource_type: "config".to_string(),
+                                _resource_type: "config".to_string(),
                                 resource_name: name.clone(),
                                 permission: value.to_string(),
-                                operation: "broker-setting".to_string(),
+                                _operation: "broker-setting".to_string(),
                                 host: self.broker.clone(),
                             });
                         }
@@ -879,10 +874,10 @@ impl Backend for KafkaBackend {
                 Err(e) => {
                     entries.push(PermissionEntry {
                         user_or_principal: "(error)".to_string(),
-                        resource_type: "broker".to_string(),
+                        _resource_type: "broker".to_string(),
                         resource_name: format!("Config error: {}", e),
                         permission: "error".to_string(),
-                        operation: "describe_configs".to_string(),
+                        _operation: "describe_configs".to_string(),
                         host: self.broker.clone(),
                     });
                 }

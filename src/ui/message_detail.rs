@@ -96,7 +96,7 @@ fn draw_content(frame: &mut Frame, app: &mut App, area: Rect) {
         (
             "timestamp",
             msg.timestamp
-                .map(|ts| format_timestamp(ts))
+                .map(format_timestamp)
                 .unwrap_or_else(|| "N/A".to_string()),
         ),
         (
@@ -156,7 +156,7 @@ fn draw_content(frame: &mut Frame, app: &mut App, area: Rect) {
     } else {
         // Fallback to binary decode or raw
         if app.detail_decoded {
-            let (b, l) = decode_payload(&app.messages.get(msg_idx).map(|m| m.body.as_str()).unwrap_or(""));
+            let (b, l) = decode_payload(app.messages.get(msg_idx).map(|m| m.body.as_str()).unwrap_or(""));
             (b, l.to_string())
         } else {
             (app.messages.get(msg_idx).map(|m| m.body.clone()).unwrap_or_default(), String::new())
@@ -259,7 +259,6 @@ fn pretty_format(body: &str) -> (String, &'static str) {
 fn pretty_xml(xml: &str) -> String {
     let mut result = String::new();
     let mut indent = 0usize;
-    let mut in_tag = false;
     let mut tag_content = String::new();
 
     for ch in xml.chars() {
@@ -271,12 +270,10 @@ fn pretty_xml(xml: &str) -> String {
                     result.push('\n');
                 }
                 tag_content.clear();
-                in_tag = true;
                 tag_content.push(ch);
             }
             '>' => {
                 tag_content.push(ch);
-                in_tag = false;
                 let tag = tag_content.trim().to_string();
 
                 if tag.starts_with("</") {
