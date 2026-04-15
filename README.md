@@ -26,7 +26,7 @@ Browse queues, read messages, publish, diff, dump, replay, and manage your broke
 
 ### Pre-built binaries
 
-Download from [GitHub Releases](https://github.com/matutetandil/queuepeek/releases) — available for macOS (ARM/Intel), Linux (x86/ARM), and Windows (x86/ARM).
+Download from [GitHub Releases](https://github.com/matutetandil/queuepeek/releases) — available for macOS (ARM/Intel), Linux (x86), and Windows (x86/ARM). For Linux ARM, install via `cargo install` or build from source.
 
 ### From crates.io
 
