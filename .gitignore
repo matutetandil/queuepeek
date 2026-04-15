@@ -3,3 +3,11 @@ CLAUDE.local.md
 # Rust build output
 /target
 
+# Binaries
+*.exe
+*.dll
+*.so
+*.dylib
+rabbitpeek
+queuepeek
+
