@@ -458,6 +458,46 @@ impl Backend for RabbitMqBackend {
             sections.push(DetailSection { title: "Consumers".into(), entries: consumers });
         }
 
+        // Consumer Details
+        if let Some(details) = data.get("consumer_details").and_then(|v| v.as_array()) {
+            for (i, cd) in details.iter().enumerate() {
+                let mut entries = Vec::new();
+
+                if let Some(tag) = cd.get("consumer_tag").and_then(|v| v.as_str()) {
+                    entries.push(DetailEntry::kv("Tag", tag));
+                }
+
+                if let Some(ch) = cd.get("channel_details") {
+                    if let Some(host) = ch.get("peer_host").and_then(|v| v.as_str()) {
+                        let port = ch.get("peer_port").and_then(|v| v.as_u64()).unwrap_or(0);
+                        entries.push(DetailEntry::kv("Address", format!("{}:{}", host, port)));
+                    }
+                    if let Some(conn) = ch.get("connection_name").and_then(|v| v.as_str()) {
+                        if !conn.is_empty() {
+                            entries.push(DetailEntry::kv("Connection", conn));
+                        }
+                    }
+                    if let Some(name) = ch.get("name").and_then(|v| v.as_str()) {
+                        entries.push(DetailEntry::kv("Channel", name));
+                    }
+                }
+
+                if let Some(prefetch) = cd.get("prefetch_count").and_then(|v| v.as_u64()) {
+                    entries.push(DetailEntry::kv("Prefetch", format_number(prefetch)));
+                }
+                if let Some(ack) = cd.get("ack_required").and_then(|v| v.as_bool()) {
+                    entries.push(DetailEntry::kv("Ack required", if ack { "yes" } else { "no" }));
+                }
+
+                if !entries.is_empty() {
+                    sections.push(DetailSection {
+                        title: format!("Consumer #{}", i + 1),
+                        entries,
+                    });
+                }
+            }
+        }
+
         // Rates
         let mut rates = Vec::new();
         if let Some(ms) = data.get("message_stats") {
