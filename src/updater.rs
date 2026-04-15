@@ -1,8 +1,7 @@
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
-// TODO: Update these when the GitHub repo is created
-const REPO_OWNER: &str = "matutedenda";
+const REPO_OWNER: &str = "matutetandil";
 const REPO_NAME: &str = "queuepeek";
 
 const CHECK_INTERVAL: Duration = Duration::from_secs(3600); // 1 hour

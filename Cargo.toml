@@ -2,7 +2,15 @@
 name = "queuepeek"
 version = "0.7.0"
 edition = "2021"
-description = "A TUI multi-broker message queue inspector"
+description = "A TUI multi-broker message queue inspector for RabbitMQ, Kafka, and MQTT"
+license = "MIT"
+repository = "https://github.com/matutetandil/queuepeek"
+homepage = "https://github.com/matutetandil/queuepeek"
+readme = "README.md"
+keywords = ["tui", "rabbitmq", "kafka", "mqtt", "queue"]
+categories = ["command-line-utilities", "development-tools"]
+authors = ["Matias Denda <matutetandil@gmail.com>"]
+exclude = ["CLAUDE.md", "CLAUDE.local.md", ".github/"]
 
 [dependencies]
 ratatui = "0.29"
