@@ -119,7 +119,10 @@ fn draw_list(frame: &mut Frame, app: &mut App, area: Rect) {
     let items: Vec<ListItem> = filtered_msg_indices
         .iter()
         .map(|&idx| {
-            let msg = &app.messages[idx];
+            let msg = match app.messages.get(idx) {
+                Some(m) => m,
+                None => return ListItem::new(Text::raw("")),
+            };
             let is_selected = app.selected_messages.contains(&idx);
 
             let ts = msg

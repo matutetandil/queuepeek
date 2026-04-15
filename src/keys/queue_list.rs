@@ -45,7 +45,10 @@ pub fn handle_queue_list_key(app: &mut App, code: KeyCode, modifiers: KeyModifie
                     let idx = app.filtered_queue_indices[selected];
                     app.current_queue_name = app.queues[idx].name.clone();
                     app.screen = Screen::MessageList;
-                    app.message_list_state.select(Some(0));
+                    app.messages.clear();
+                    app.filtered_message_indices.clear();
+                    app.selected_messages.clear();
+                    app.message_list_state.select(None);
                     app.loading = true;
                     app.set_status(format!("Loading messages from {}", app.current_queue_name), false);
                     app.load_messages();
@@ -262,7 +265,10 @@ fn handle_queue_filter_key(app: &mut App, code: KeyCode) {
                     app.queue_filter_active = false;
                     app.queue_filter_focused = false;
                     app.screen = Screen::MessageList;
-                    app.message_list_state.select(Some(0));
+                    app.messages.clear();
+                    app.filtered_message_indices.clear();
+                    app.selected_messages.clear();
+                    app.message_list_state.select(None);
                     app.loading = true;
                     app.set_status(format!("Loading messages from {}", app.current_queue_name), false);
                     app.load_messages();
