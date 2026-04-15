@@ -87,6 +87,8 @@ See the [full configuration guide](docs/configuration.md) for TLS, MQTT topics, 
 | `Shift+G` | Consumer groups | — | — |
 | `Shift+X` | Topology | — | — |
 | `F5` | Benchmark | — | — |
+| `n`/`N` | — | — | Next/prev match |
+| `?` | Help | Help | Help |
 | `Esc` | Back | Back/clear | Back |
 
 See the [full keyboard reference](docs/keyboard-shortcuts.md) for all shortcuts.

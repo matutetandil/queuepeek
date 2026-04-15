@@ -1,5 +1,40 @@
 # Changelog
 
+## [0.8.0] - 2026-04-15
+
+### Added
+- Vim-style payload search in message detail (`/` to search, `n`/`N` to navigate matches)
+  - Case-insensitive search with highlighted matches in the payload
+  - Match counter in search bar, adapts to current display mode (pretty-print, decode, schema)
+- File browser popup for export and import operations
+  - Directory navigation with `j`/`k`, `Enter` to open, `Backspace` to go up, `..` for parent
+  - Export mode shows directories only; import mode shows files and directories
+  - `Tab` to edit filename, `Ctrl+H` to toggle hidden files
+  - Pre-populated filename with timestamp
+- Consumer details in RabbitMQ queue info popup (`i`)
+  - Shows each consumer's IP address, port, tag, connection, channel, prefetch, and ack mode
+- Update confirmation popup with version comparison
+  - `Shift+U` opens a confirm dialog instead of updating inline (prevents TUI corruption)
+  - Async download with completion popup prompting restart
+- Two-line status bar across all screens
+  - Top line: keyboard shortcuts
+  - Bottom line: notifications, update hints, status messages
+- Help popup (`?`) available on all screens including profile select
+  - Contextual shortcuts adapt to current screen, backend, and state (e.g., search active)
+
+### Changed
+- Export (`e`) now opens file picker instead of saving to current directory
+- Import (`I`) now opens file picker with file browsing instead of text path input
+- Footer shortcuts in message detail are contextual (search-mode shows `n`/`N`, normal shows all shortcuts)
+- `Esc` in message detail is now three-stage: clear search → clear query → go back
+
+### Fixed
+- Panic on entering message list when messages hadn't loaded yet (index out of bounds)
+- Help popup not rendering in message detail screen (missing popup draw call)
+- Search state persisting across message detail entries
+
+---
+
 ## [0.7.0] - 2026-04-10
 
 ### Changed
