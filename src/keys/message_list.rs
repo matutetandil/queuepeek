@@ -44,6 +44,10 @@ pub fn handle_message_list_key(app: &mut App, code: KeyCode, modifiers: KeyModif
                 if selected < app.filtered_message_indices.len() {
                     app.detail_message_idx = app.filtered_message_indices[selected];
                     app.detail_scroll = 0;
+                    app.detail_search_active = false;
+                    app.detail_search_query.clear();
+                    app.detail_search_matches.clear();
+                    app.detail_search_current = 0;
                     app.screen = Screen::MessageDetail;
                 }
             }
