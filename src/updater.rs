@@ -113,7 +113,15 @@ fn version_newer(latest: &str, current: &str) -> bool {
 }
 
 pub fn perform_update() -> Result<String, String> {
-    let status = self_update::backends::github::Update::configure()
+    // Redirect stdout to /dev/null during update to prevent TUI corruption.
+    // self_update writes progress text to stdout even with show_download_progress(false).
+    use std::os::unix::io::AsRawFd;
+    let devnull = std::fs::File::open("/dev/null").map_err(|e| format!("Opening /dev/null: {}", e))?;
+    let stdout_fd = std::io::stdout().as_raw_fd();
+    let saved_stdout = unsafe { libc::dup(stdout_fd) };
+    unsafe { libc::dup2(devnull.as_raw_fd(), stdout_fd) };
+
+    let result = self_update::backends::github::Update::configure()
         .repo_owner(REPO_OWNER)
         .repo_name(REPO_NAME)
         .bin_name("queuepeek")
@@ -123,7 +131,12 @@ pub fn perform_update() -> Result<String, String> {
         .build()
         .map_err(|e| format!("Configuring update: {}", e))?
         .update()
-        .map_err(|e| format!("Performing update: {}", e))?;
+        .map_err(|e| format!("Performing update: {}", e));
 
+    // Restore stdout
+    unsafe { libc::dup2(saved_stdout, stdout_fd) };
+    unsafe { libc::close(saved_stdout) };
+
+    let status = result?;
     Ok(format!("Updated to v{}. Restart to apply.", status.version()))
 }
