@@ -82,6 +82,7 @@ fn draw_help(frame: &mut Frame, app: &App) {
 
     let bt = app.current_backend_type();
     let screen_label = match app.screen {
+        crate::app::Screen::ProfileSelect => "Profiles",
         crate::app::Screen::QueueList => "Queue List",
         crate::app::Screen::MessageList => "Messages",
         crate::app::Screen::MessageDetail => "Message Detail",
@@ -94,8 +95,14 @@ fn draw_help(frame: &mut Frame, app: &App) {
         _ => bt,
     };
 
+    let title = if matches!(app.screen, crate::app::Screen::ProfileSelect) {
+        format!(" {} ", screen_label)
+    } else {
+        format!(" {} — {} ", screen_label, backend_label)
+    };
+
     let block = Block::bordered()
-        .title(format!(" {} — {} ", screen_label, backend_label))
+        .title(title)
         .title_style(Style::default().fg(app.theme.accent).bold())
         .border_style(Style::default().fg(app.theme.accent))
         .style(Style::default().bg(app.theme.bg));
@@ -191,14 +198,34 @@ fn draw_help(frame: &mut Frame, app: &App) {
                 ("h", "Copy headers to clipboard"),
                 ("E", "Edit & re-publish"),
                 ("/", "Search in payload"),
-                ("n", "Next search match"),
-                ("N", "Previous search match"),
             ]);
+            if !app.detail_search_query.is_empty() {
+                shortcuts.extend([
+                    ("n", "Next search match"),
+                    ("N", "Previous search match"),
+                ]);
+            }
             if bt == "rabbitmq" {
                 shortcuts.push(("L", "DLQ re-route (x-death)"));
             }
+            if !app.detail_search_query.is_empty() {
+                shortcuts.push(("esc", "Clear search / go back"));
+            } else {
+                shortcuts.push(("esc", "Go back to messages"));
+            }
             shortcuts.extend([
-                ("esc", "Clear search / go back"),
+                ("?", "Toggle help"),
+                ("q", "Quit"),
+            ]);
+        }
+        crate::app::Screen::ProfileSelect => {
+            shortcuts.extend([
+                ("j/k ↑/↓", "Navigate profiles"),
+                ("⏎", "Connect to profile"),
+                ("a", "Add new profile"),
+                ("e", "Edit selected profile"),
+                ("d", "Delete selected profile"),
+                ("t", "Change theme"),
                 ("?", "Toggle help"),
                 ("q", "Quit"),
             ]);

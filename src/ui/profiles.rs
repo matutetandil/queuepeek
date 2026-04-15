@@ -79,6 +79,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
                 Span::styled("e", ks), Span::styled(":edit ", ds),
                 Span::styled("d", ks), Span::styled(":del ", ds),
                 Span::styled("t", ks), Span::styled(":theme ", ds),
+                Span::styled("?", ks), Span::styled(":help ", ds),
                 Span::styled("q", ks), Span::styled(":quit", ds),
             ];
             spans.extend(super::update_hint_spans(app));
