@@ -15,7 +15,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     let chunks = Layout::vertical([
         Constraint::Length(1), // header
         Constraint::Min(3),    // message list
-        Constraint::Length(1), // footer
+        Constraint::Length(2), // footer
     ])
     .split(area);
 
@@ -221,8 +221,9 @@ fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
         String::new()
     };
 
+    // Line 1: keyboard shortcuts
     let bt = app.current_backend_type();
-    let mut spans = vec![
+    let mut shortcut_spans = vec![
         Span::styled(" ", Style::default()),
         Span::styled("spc", ks),
         Span::styled(":select ", ds),
@@ -242,34 +243,39 @@ fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
         Span::styled(":import ", ds),
     ];
     if bt == "rabbitmq" {
-        spans.extend([Span::styled("L", ks), Span::styled(":reroute ", ds)]);
+        shortcut_spans.extend([Span::styled("L", ks), Span::styled(":reroute ", ds)]);
     }
     if bt == "kafka" {
-        spans.extend([Span::styled("Y", ks), Span::styled(":replay ", ds)]);
+        shortcut_spans.extend([Span::styled("Y", ks), Span::styled(":replay ", ds)]);
     }
-    spans.extend([
+    shortcut_spans.extend([
         Span::styled("T", ks), Span::styled(":tail ", ds),
         Span::styled("r", ks), Span::styled(":refresh ", ds),
         Span::styled("?", ks), Span::styled(":help", ds),
     ]);
+    let line1 = Line::from(shortcut_spans);
+
+    // Line 2: status/notifications
+    let mut status_spans: Vec<Span> = vec![Span::styled(" ", Style::default())];
+    status_spans.extend(super::update_hint_spans(app));
     if !sel_info.is_empty() {
-        spans.push(Span::styled(sel_info, Style::default().fg(app.theme.success).bold()));
+        status_spans.push(Span::styled(sel_info, Style::default().fg(app.theme.success).bold()));
     }
     if !app.scheduled_messages.is_empty() {
-        spans.push(Span::styled(
+        status_spans.push(Span::styled(
             format!(" ⏱{} ", app.scheduled_messages.len()),
             Style::default().fg(app.theme.success).bold(),
         ));
-        spans.push(Span::styled("S", ks));
-        spans.push(Span::styled(":view ", ds));
+        status_spans.push(Span::styled("S", ks));
+        status_spans.push(Span::styled(":view ", ds));
     }
-    spans.extend(super::update_hint_spans(app));
-    spans.push(Span::styled("  │ ", Style::default().fg(app.theme.divider)));
-    spans.push(Span::styled(status_text, Style::default().fg(status_color)));
-    let line = Line::from(spans);
+    status_spans.push(Span::styled("  │ ", Style::default().fg(app.theme.divider)));
+    status_spans.push(Span::styled(status_text, Style::default().fg(status_color)));
+    let line2 = Line::from(status_spans);
 
+    let text = ratatui::text::Text::from(vec![line1, line2]);
     frame.render_widget(
-        Paragraph::new(line).style(Style::default().bg(app.theme.sidebar_bg)),
+        Paragraph::new(text).style(Style::default().bg(app.theme.sidebar_bg)),
         area,
     );
 }

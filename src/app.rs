@@ -75,7 +75,6 @@ pub enum Popup {
     MessageQueuePicker(QueueOperation),
     OperationProgress,
     ConfirmDeleteMessages,
-    ImportFile,
     QueueInfo,
     EditMessage,
     ConfirmReroute { exchange: String, routing_key: String, count: usize },
@@ -103,6 +102,19 @@ pub enum Popup {
     AlertLog,
     ConfirmUpdate,
     UpdateComplete(String),
+    FilePicker(FilePickerMode),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum FilePickerMode {
+    Export,
+    Import,
+}
+
+#[derive(Debug, Clone)]
+pub struct FilePickerEntry {
+    pub name: String,
+    pub is_dir: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -292,6 +304,16 @@ pub struct App {
 
     // Import
     pub import_file_path: String,
+
+    // File picker
+    pub file_picker_dir: std::path::PathBuf,
+    pub file_picker_entries: Vec<FilePickerEntry>,
+    pub file_picker_selected: usize,
+    pub file_picker_scroll: usize,
+    pub file_picker_filename: String,
+    pub file_picker_filename_focused: bool,
+    pub file_picker_show_files: bool,
+    pub file_picker_show_hidden: bool,
 
     // Message auto-refresh (tail mode)
     pub message_auto_refresh: bool,
@@ -665,6 +687,14 @@ impl App {
             queue_picker_filter: String::new(),
             queue_picker_filter_active: false,
             import_file_path: String::new(),
+            file_picker_dir: std::env::current_dir().unwrap_or_default(),
+            file_picker_entries: Vec::new(),
+            file_picker_selected: 0,
+            file_picker_scroll: 0,
+            file_picker_filename: String::new(),
+            file_picker_filename_focused: false,
+            file_picker_show_files: false,
+            file_picker_show_hidden: false,
             message_auto_refresh: false,
             queue_detail: Vec::new(),
             queue_info_scroll: 0,
@@ -1069,19 +1099,55 @@ impl App {
         }
     }
 
-    /// Export selected messages (from memory) to a JSON file
-    pub fn export_messages_to_json(&self) -> Result<String, String> {
+    pub fn refresh_file_picker(&mut self) {
+        let mut entries = Vec::new();
+        if let Ok(read_dir) = std::fs::read_dir(&self.file_picker_dir) {
+            for entry in read_dir.flatten() {
+                let name = entry.file_name().to_string_lossy().to_string();
+                if !self.file_picker_show_hidden && name.starts_with('.') {
+                    continue;
+                }
+                let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
+                if !is_dir && !self.file_picker_show_files {
+                    continue;
+                }
+                entries.push(FilePickerEntry { name, is_dir });
+            }
+        }
+        entries.sort_by(|a, b| {
+            b.is_dir.cmp(&a.is_dir).then(a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+        });
+        self.file_picker_entries = entries;
+        self.file_picker_selected = 0;
+        self.file_picker_scroll = 0;
+    }
+
+    pub fn open_file_picker(&mut self, mode: FilePickerMode) {
+        self.file_picker_dir = std::env::current_dir().unwrap_or_default();
+        let timestamp = chrono_timestamp();
+        self.file_picker_show_hidden = false;
+        match mode {
+            FilePickerMode::Export => {
+                self.file_picker_filename = format!("queuepeek-export-{}.json", timestamp);
+                self.file_picker_show_files = false;
+            }
+            FilePickerMode::Import => {
+                self.file_picker_filename = String::new();
+                self.file_picker_show_files = true;
+            }
+        }
+        self.file_picker_filename_focused = false;
+        self.refresh_file_picker();
+        self.popup = Popup::FilePicker(mode);
+    }
+
+    pub fn export_messages_to_path(&self, path: &std::path::Path) -> Result<String, String> {
         let messages = self.get_target_messages();
         if messages.is_empty() {
             return Err("No messages to export".into());
         }
 
-        let filename = format!("queuepeek-export-{}.json", chrono_timestamp());
-        let path = std::env::current_dir()
-            .unwrap_or_default()
-            .join(&filename);
-
-        let file = std::fs::File::create(&path)
+        let file = std::fs::File::create(path)
             .map_err(|e| format!("Creating file: {}", e))?;
         let mut writer = std::io::BufWriter::new(file);
 

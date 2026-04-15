@@ -53,7 +53,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
 
     // Content area below logo
     let content_y = inner.y + logo_height + 1;
-    let content_height = inner.height.saturating_sub(logo_height + 2); // +2 for gap and footer
+    let content_height = inner.height.saturating_sub(logo_height + 3); // +3 for gap and 2-line footer
     let content_area = Rect::new(inner.x, content_y, inner.width, content_height);
 
     match &app.profile_mode {
@@ -65,14 +65,14 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         }
     }
 
-    // Footer
-    let footer_y = inner.y + inner.height.saturating_sub(1);
-    let footer_area = Rect::new(inner.x, footer_y, inner.width, 1);
+    // Footer (2 lines)
+    let footer_y = inner.y + inner.height.saturating_sub(2);
+    let footer_area = Rect::new(inner.x, footer_y, inner.width, 2);
     let ks = Style::default().fg(theme.accent).add_modifier(Modifier::BOLD).bg(theme.bg);
     let ds = Style::default().fg(theme.muted).bg(theme.bg);
-    let footer_line = match &app.profile_mode {
+    let shortcut_line = match &app.profile_mode {
         ProfileMode::Select => {
-            let mut spans = vec![
+            Line::from(vec![
                 Span::styled("j/k", ks), Span::styled(":nav ", ds),
                 Span::styled("⏎", ks), Span::styled(":connect ", ds),
                 Span::styled("a", ks), Span::styled(":add ", ds),
@@ -81,9 +81,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
                 Span::styled("t", ks), Span::styled(":theme ", ds),
                 Span::styled("?", ks), Span::styled(":help ", ds),
                 Span::styled("q", ks), Span::styled(":quit", ds),
-            ];
-            spans.extend(super::update_hint_spans(app));
-            Line::from(spans)
+            ])
         }
         ProfileMode::ConfirmDelete => Line::from(vec![
             Span::styled("Delete? ", ds),
@@ -95,30 +93,32 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
                 7 => ":toggle ",
                 _ => ":save ",
             };
-            let mut spans = vec![
+            Line::from(vec![
                 Span::styled("tab", ks), Span::styled(":next ", ds),
                 Span::styled("⏎", ks), Span::styled(enter_hint, ds),
                 Span::styled("esc", ks), Span::styled(":cancel", ds),
-            ];
-            spans.extend(super::update_hint_spans(app));
-            Line::from(spans)
+            ])
         }
     };
-    let footer = Paragraph::new(footer_line).style(Style::default().bg(theme.bg));
-    frame.render_widget(footer, footer_area);
 
-    // Status message
+    // Line 2: update hints + status
+    let mut status_spans: Vec<Span> = Vec::new();
+    status_spans.extend(super::update_hint_spans(app));
     if !app.status_message.is_empty() {
-        let status_y = footer_y.saturating_sub(1);
-        let status_area = Rect::new(inner.x, status_y, inner.width, 1);
         let status_color = if app.status_is_error { theme.error } else { theme.success };
-        let status = Paragraph::new(Line::from(Span::styled(
-            &app.status_message,
+        if !status_spans.is_empty() {
+            status_spans.push(Span::styled("  │ ", Style::default().fg(theme.divider).bg(theme.bg)));
+        }
+        status_spans.push(Span::styled(
+            app.status_message.as_str(),
             Style::default().fg(status_color).bg(theme.bg),
-        )))
-        .style(Style::default().bg(theme.bg));
-        frame.render_widget(status, status_area);
+        ));
     }
+    let status_line = Line::from(status_spans);
+
+    let footer_text = ratatui::text::Text::from(vec![shortcut_line, status_line]);
+    let footer = Paragraph::new(footer_text).style(Style::default().bg(theme.bg));
+    frame.render_widget(footer, footer_area);
 
     // Popups on top
     if app.popup != crate::app::Popup::None {

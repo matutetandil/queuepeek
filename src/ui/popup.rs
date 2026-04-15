@@ -24,7 +24,6 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
             draw_confirm(frame, app, "Delete Messages",
                 &format!("Delete {} selected message(s)?\n\nThis consumes all messages and re-publishes\nthe ones not selected. This is destructive.", count));
         }
-        Popup::ImportFile => draw_import_file(frame, app),
         Popup::QueueInfo => draw_queue_info(frame, app),
         Popup::ConsumerGroups => draw_consumer_groups(frame, app),
         Popup::ResetOffsetPicker => draw_reset_offset_picker(frame, app),
@@ -57,6 +56,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
             );
             draw_confirm(frame, app, "DLQ Re-route", &msg);
         }
+        Popup::FilePicker(_) => draw_file_picker(frame, app),
         Popup::ConfirmUpdate => draw_confirm_update(frame, app),
         Popup::UpdateComplete(ref msg) => {
             let msg = msg.clone();
@@ -605,45 +605,7 @@ fn draw_queue_picker(frame: &mut Frame, app: &mut App) {
     }
 }
 
-fn draw_import_file(frame: &mut Frame, app: &App) {
-    let popup_area = centered_rect(60, 25, frame.area());
-    frame.render_widget(Clear, popup_area);
 
-    let block = Block::bordered()
-        .title(" Import Messages ")
-        .title_style(Style::default().fg(app.theme.accent).bold())
-        .border_style(Style::default().fg(app.theme.accent))
-        .style(Style::default().bg(app.theme.bg));
-
-    let inner = Rect::new(popup_area.x + 2, popup_area.y + 1, popup_area.width.saturating_sub(4), popup_area.height.saturating_sub(2));
-
-    frame.render_widget(block, popup_area);
-
-    let label_style = Style::default().fg(app.theme.accent);
-    let value_style = Style::default().fg(app.theme.white);
-    let hint_style = Style::default().fg(app.theme.muted);
-
-    let lines = vec![
-        Line::from(""),
-        Line::from(Span::styled("  File path (JSONL or JSON):", label_style)),
-        Line::from(""),
-        Line::from(Span::styled(format!("  {}█", app.import_file_path), value_style)),
-        Line::from(""),
-        Line::from(Span::styled("  Supports .jsonl (dump) and .json (export) formats", hint_style)),
-        Line::from(""),
-        Line::from(vec![
-            Span::styled("  ⏎", Style::default().fg(app.theme.accent).bold()),
-            Span::styled(":import  ", hint_style),
-            Span::styled("esc", Style::default().fg(app.theme.accent).bold()),
-            Span::styled(":cancel", hint_style),
-        ]),
-    ];
-
-    frame.render_widget(
-        Paragraph::new(lines).style(Style::default().bg(app.theme.bg)),
-        inner,
-    );
-}
 
 fn draw_operation_progress(frame: &mut Frame, app: &App) {
     let popup_area = centered_rect(40, 20, frame.area());
@@ -1956,6 +1918,167 @@ fn draw_alert_log(frame: &mut Frame, app: &mut App) {
     frame.render_widget(
         Paragraph::new(lines).style(Style::default().bg(app.theme.bg)),
         inner,
+    );
+}
+
+fn draw_file_picker(frame: &mut Frame, app: &App) {
+    let popup_area = centered_rect(70, 75, frame.area());
+    frame.render_widget(Clear, popup_area);
+
+    let title = match app.popup {
+        Popup::FilePicker(crate::app::FilePickerMode::Export) => " Export — Choose Location ",
+        Popup::FilePicker(crate::app::FilePickerMode::Import) => " Import — Choose File ",
+        _ => " Save File ",
+    };
+
+    let hidden_indicator = if app.file_picker_show_hidden { " [hidden: on]" } else { "" };
+
+    let block = Block::bordered()
+        .title(format!("{}{} ", title, hidden_indicator))
+        .title_style(Style::default().fg(app.theme.accent).bold())
+        .border_style(Style::default().fg(app.theme.accent))
+        .style(Style::default().bg(app.theme.bg));
+
+    let inner = block.inner(popup_area);
+    frame.render_widget(block, popup_area);
+
+    let chunks = Layout::vertical([
+        Constraint::Length(1), // current path
+        Constraint::Length(1), // separator
+        Constraint::Min(3),   // directory listing
+        Constraint::Length(1), // separator
+        Constraint::Length(1), // filename input
+        Constraint::Length(1), // Tab hint
+        Constraint::Length(1), // hints
+    ])
+    .split(inner);
+
+    // Current path
+    let dir_display = app.file_picker_dir.display().to_string();
+    let path_line = Line::from(vec![
+        Span::styled("  ", Style::default()),
+        Span::styled(&dir_display, Style::default().fg(app.theme.accent).bold()),
+    ]);
+    frame.render_widget(
+        Paragraph::new(path_line).style(Style::default().bg(app.theme.bg)),
+        chunks[0],
+    );
+
+    // Separator
+    frame.render_widget(
+        Paragraph::new("  ─────").style(Style::default().fg(app.theme.divider).bg(app.theme.bg)),
+        chunks[1],
+    );
+
+    // Directory listing with proper scroll tracking
+    let visible_height = chunks[2].height as usize;
+    // +1 for the ".." entry
+    let total_items = app.file_picker_entries.len() + 1;
+
+    // Compute scroll to keep selected visible
+    let scroll = if visible_height >= total_items || app.file_picker_selected < visible_height / 2 {
+        0
+    } else if app.file_picker_selected + visible_height / 2 >= total_items {
+        total_items.saturating_sub(visible_height)
+    } else {
+        app.file_picker_selected.saturating_sub(visible_height / 2)
+    };
+
+    let mut lines: Vec<Line> = Vec::new();
+
+    // ".." entry at index 0
+    let up_selected = app.file_picker_selected == 0 && !app.file_picker_filename_focused;
+    let up_style = if up_selected {
+        Style::default().fg(app.theme.bg).bg(app.theme.accent)
+    } else {
+        Style::default().fg(app.theme.muted)
+    };
+    lines.push(Line::from(Span::styled(" / ..", up_style)));
+
+    for (i, entry) in app.file_picker_entries.iter().enumerate() {
+        // i+1 because index 0 is ".."
+        let is_selected = (i + 1) == app.file_picker_selected && !app.file_picker_filename_focused;
+        let (icon, name_style) = if entry.is_dir {
+            (" / ", if is_selected {
+                Style::default().fg(app.theme.bg).bg(app.theme.accent)
+            } else {
+                Style::default().fg(app.theme.accent)
+            })
+        } else {
+            ("   ", if is_selected {
+                Style::default().fg(app.theme.bg).bg(app.theme.primary)
+            } else {
+                Style::default().fg(app.theme.muted)
+            })
+        };
+        lines.push(Line::from(vec![
+            Span::styled(icon, name_style),
+            Span::styled(&entry.name, name_style),
+        ]));
+    }
+
+    let visible_lines: Vec<Line> = lines.into_iter().skip(scroll).take(visible_height).collect();
+
+    frame.render_widget(
+        Paragraph::new(visible_lines).style(Style::default().bg(app.theme.bg)),
+        chunks[2],
+    );
+
+    // Separator
+    frame.render_widget(
+        Paragraph::new("  ─────").style(Style::default().fg(app.theme.divider).bg(app.theme.bg)),
+        chunks[3],
+    );
+
+    // Filename input
+    let cursor = if app.file_picker_filename_focused { "▎" } else { "" };
+    let filename_style = if app.file_picker_filename_focused {
+        Style::default().fg(app.theme.white)
+    } else {
+        Style::default().fg(app.theme.muted)
+    };
+    let filename_line = Line::from(vec![
+        Span::styled("  File: ", Style::default().fg(app.theme.accent)),
+        Span::styled(&app.file_picker_filename, filename_style),
+        Span::styled(cursor, Style::default().fg(app.theme.accent)),
+    ]);
+    frame.render_widget(
+        Paragraph::new(filename_line).style(Style::default().bg(app.theme.bg)),
+        chunks[4],
+    );
+
+    // Tab hint when not focused on filename
+    let tab_hint = if !app.file_picker_filename_focused {
+        Line::from(Span::styled("  Press Tab to edit filename, Enter to save here", Style::default().fg(app.theme.muted)))
+    } else {
+        Line::from("")
+    };
+    frame.render_widget(
+        Paragraph::new(tab_hint).style(Style::default().bg(app.theme.bg)),
+        chunks[5],
+    );
+
+    // Hints
+    let ks = Style::default().fg(app.theme.accent).bold();
+    let ds = Style::default().fg(app.theme.muted);
+    let hints = if app.file_picker_filename_focused {
+        Line::from(vec![
+            Span::styled("  Enter", ks), Span::styled(":save ", ds),
+            Span::styled("Esc", ks), Span::styled(":back to dirs", ds),
+        ])
+    } else {
+        Line::from(vec![
+            Span::styled("  j/k", ks), Span::styled(":nav ", ds),
+            Span::styled("Enter", ks), Span::styled(":open ", ds),
+            Span::styled("Bksp", ks), Span::styled(":up ", ds),
+            Span::styled("Tab", ks), Span::styled(":filename ", ds),
+            Span::styled("Ctrl+H", ks), Span::styled(":hidden ", ds),
+            Span::styled("Esc", ks), Span::styled(":cancel", ds),
+        ])
+    };
+    frame.render_widget(
+        Paragraph::new(hints).style(Style::default().bg(app.theme.bg)),
+        chunks[6],
     );
 }
 

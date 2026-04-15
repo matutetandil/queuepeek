@@ -278,25 +278,6 @@ pub fn handle_popup_key(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
                 KeyCode::Char('q'), KeyCode::Char('i'),
             ]);
         }
-        Popup::ImportFile => {
-            match code {
-                KeyCode::Char(c) => {
-                    app.import_file_path.push(c);
-                }
-                KeyCode::Backspace => {
-                    app.import_file_path.pop();
-                }
-                KeyCode::Enter => {
-                    app.popup = Popup::None;
-                    app.do_import_jsonl();
-                }
-                KeyCode::Esc => {
-                    app.popup = Popup::None;
-                    app.import_file_path.clear();
-                }
-                _ => {}
-            }
-        }
         Popup::OperationProgress => {
             if code == KeyCode::Esc {
                 app.operation_cancel.store(true, std::sync::atomic::Ordering::Relaxed);
@@ -707,6 +688,87 @@ pub fn handle_popup_key(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
                     }
                 }
                 _ => {}
+            }
+        }
+        Popup::FilePicker(ref mode) => {
+            let mode = mode.clone();
+            if app.file_picker_filename_focused {
+                match code {
+                    KeyCode::Esc => {
+                        app.file_picker_filename_focused = false;
+                    }
+                    KeyCode::Enter => {
+                        let path = app.file_picker_dir.join(&app.file_picker_filename);
+                        match mode {
+                            app::FilePickerMode::Export => {
+                                match app.export_messages_to_path(&path) {
+                                    Ok(msg) => app.set_status(msg, false),
+                                    Err(e) => app.set_status(e, true),
+                                }
+                            }
+                            app::FilePickerMode::Import => {
+                                app.import_file_path = path.to_string_lossy().to_string();
+                                app.do_import_jsonl();
+                            }
+                        }
+                        app.popup = Popup::None;
+                    }
+                    KeyCode::Char(c) => {
+                        app.file_picker_filename.push(c);
+                    }
+                    KeyCode::Backspace => {
+                        app.file_picker_filename.pop();
+                    }
+                    _ => {}
+                }
+            } else {
+                match (code, modifiers) {
+                    (KeyCode::Esc, _) => {
+                        app.popup = Popup::None;
+                    }
+                    (KeyCode::Char('j'), _) | (KeyCode::Down, _) => {
+                        // +1 for the ".." entry at index 0
+                        let total = app.file_picker_entries.len() + 1;
+                        if app.file_picker_selected + 1 < total {
+                            app.file_picker_selected += 1;
+                        }
+                    }
+                    (KeyCode::Char('k'), _) | (KeyCode::Up, _) => {
+                        app.file_picker_selected = app.file_picker_selected.saturating_sub(1);
+                    }
+                    (KeyCode::Enter, _) => {
+                        if app.file_picker_selected == 0 {
+                            // ".." — go up
+                            if let Some(parent) = app.file_picker_dir.parent() {
+                                app.file_picker_dir = parent.to_path_buf();
+                                app.refresh_file_picker();
+                            }
+                        } else if let Some(entry) = app.file_picker_entries.get(app.file_picker_selected - 1) {
+                            if entry.is_dir {
+                                let new_dir = app.file_picker_dir.join(&entry.name);
+                                app.file_picker_dir = new_dir;
+                                app.refresh_file_picker();
+                            } else if app.file_picker_show_files {
+                                app.file_picker_filename = entry.name.clone();
+                                app.file_picker_filename_focused = true;
+                            }
+                        }
+                    }
+                    (KeyCode::Backspace, _) => {
+                        if let Some(parent) = app.file_picker_dir.parent() {
+                            app.file_picker_dir = parent.to_path_buf();
+                            app.refresh_file_picker();
+                        }
+                    }
+                    (KeyCode::Tab, _) => {
+                        app.file_picker_filename_focused = true;
+                    }
+                    (KeyCode::Char('h'), m) if m.contains(KeyModifiers::CONTROL) => {
+                        app.file_picker_show_hidden = !app.file_picker_show_hidden;
+                        app.refresh_file_picker();
+                    }
+                    _ => {}
+                }
             }
         }
         Popup::ConfirmUpdate => {

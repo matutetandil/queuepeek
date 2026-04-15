@@ -16,7 +16,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         Constraint::Length(1), // header bar
         Constraint::Length(1), // filter bar
         Constraint::Min(3),    // queue list
-        Constraint::Length(1), // footer/status
+        Constraint::Length(2), // footer/status
     ])
     .split(area);
 
@@ -234,8 +234,9 @@ fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
         ("", app.theme.muted)
     };
 
+    // Line 1: keyboard shortcuts
     let bt = app.current_backend_type();
-    let mut spans = vec![
+    let mut shortcut_spans = vec![
         Span::styled(" ", Style::default()),
         Span::styled("j/k", ks),
         Span::styled(":nav ", ds),
@@ -257,33 +258,38 @@ fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
         Span::styled(":compare ", ds),
     ];
     if bt == "kafka" {
-        spans.extend([Span::styled("G", ks), Span::styled(":groups ", ds)]);
+        shortcut_spans.extend([Span::styled("G", ks), Span::styled(":groups ", ds)]);
     }
     if bt == "rabbitmq" {
-        spans.extend([Span::styled("X", ks), Span::styled(":topology ", ds)]);
+        shortcut_spans.extend([Span::styled("X", ks), Span::styled(":topology ", ds)]);
     }
     if bt == "mqtt" {
-        spans.extend([Span::styled("H", ks), Span::styled(":retained ", ds)]);
+        shortcut_spans.extend([Span::styled("H", ks), Span::styled(":retained ", ds)]);
     }
-    spans.extend([
+    shortcut_spans.extend([
         Span::styled("A", ks), Span::styled(":perms ", ds),
         Span::styled("?", ks), Span::styled(":help", ds),
     ]);
+    let line1 = Line::from(shortcut_spans);
+
+    // Line 2: status/notifications
+    let mut status_spans: Vec<Span> = vec![Span::styled(" ", Style::default())];
+    status_spans.extend(super::update_hint_spans(app));
     if !app.scheduled_messages.is_empty() {
-        spans.push(Span::styled(
+        status_spans.push(Span::styled(
             format!(" ⏱{} ", app.scheduled_messages.len()),
             Style::default().fg(app.theme.success).bold(),
         ));
-        spans.push(Span::styled("S", ks));
-        spans.push(Span::styled(":view ", ds));
+        status_spans.push(Span::styled("S", ks));
+        status_spans.push(Span::styled(":view ", ds));
     }
-    spans.extend(super::update_hint_spans(app));
-    spans.push(Span::styled("  │ ", Style::default().fg(app.theme.divider)));
-    spans.push(Span::styled(status_text, Style::default().fg(status_color)));
-    let line = Line::from(spans);
+    status_spans.push(Span::styled("  │ ", Style::default().fg(app.theme.divider)));
+    status_spans.push(Span::styled(status_text, Style::default().fg(status_color)));
+    let line2 = Line::from(status_spans);
 
+    let text = ratatui::text::Text::from(vec![line1, line2]);
     frame.render_widget(
-        Paragraph::new(line).style(Style::default().bg(app.theme.sidebar_bg)),
+        Paragraph::new(text).style(Style::default().bg(app.theme.sidebar_bg)),
         area,
     );
 }

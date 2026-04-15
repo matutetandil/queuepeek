@@ -127,18 +127,14 @@ pub fn handle_message_list_key(app: &mut App, code: KeyCode, modifiers: KeyModif
         }
         KeyCode::Char('e') => {
             if app.selection_count() > 0 {
-                match app.export_messages_to_json() {
-                    Ok(msg) => app.set_status(msg, false),
-                    Err(e) => app.set_status(e, true),
-                }
+                app.open_file_picker(crate::app::FilePickerMode::Export);
             }
         }
         KeyCode::Char('W') => {
             app.do_dump_queue();
         }
         KeyCode::Char('I') => {
-            app.import_file_path = "./".to_string();
-            app.popup = Popup::ImportFile;
+            app.open_file_picker(crate::app::FilePickerMode::Import);
         }
         KeyCode::Char('T') => {
             app.message_auto_refresh = !app.message_auto_refresh;
