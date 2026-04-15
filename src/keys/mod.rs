@@ -7,7 +7,6 @@ mod popup;
 use crossterm::event::{KeyCode, KeyModifiers};
 
 use crate::app::{App, Popup, Screen};
-use crate::updater;
 
 pub fn handle_key(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
     // Ctrl+C always quits
@@ -18,11 +17,9 @@ pub fn handle_key(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
 
     // Global: U to trigger update (only when update is available and no popup open)
     if code == KeyCode::Char('U') && app.popup == Popup::None && app.update_checker.update_available {
-        app.set_status("Updating...", false);
-        match updater::perform_update() {
-            Ok(msg) => app.set_status(msg, false),
-            Err(e) => app.set_status(format!("Update failed: {}", e), true),
-        }
+        let version = app.update_checker.latest_version.clone().unwrap_or_else(|| "new".into());
+        app.popup = Popup::ConfirmUpdate;
+        app.set_status(format!("v{} available", version), false);
         return;
     }
 

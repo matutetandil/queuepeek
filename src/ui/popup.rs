@@ -57,6 +57,11 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
             );
             draw_confirm(frame, app, "DLQ Re-route", &msg);
         }
+        Popup::ConfirmUpdate => draw_confirm_update(frame, app),
+        Popup::UpdateComplete(ref msg) => {
+            let msg = msg.clone();
+            draw_update_complete(frame, app, &msg);
+        }
         Popup::None => {}
     }
 }
@@ -1951,5 +1956,83 @@ fn draw_alert_log(frame: &mut Frame, app: &mut App) {
     frame.render_widget(
         Paragraph::new(lines).style(Style::default().bg(app.theme.bg)),
         inner,
+    );
+}
+
+fn draw_confirm_update(frame: &mut Frame, app: &App) {
+    let popup_area = centered_rect(50, 30, frame.area());
+    frame.render_widget(Clear, popup_area);
+
+    let version = app.update_checker.latest_version.as_deref().unwrap_or("unknown");
+
+    let block = Block::bordered()
+        .title(" Update Available ")
+        .title_style(Style::default().fg(app.theme.success).bold())
+        .border_style(Style::default().fg(app.theme.success))
+        .style(Style::default().bg(app.theme.bg));
+
+    let lines = vec![
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("  Current: ", Style::default().fg(app.theme.muted)),
+            Span::styled(format!("v{}", env!("CARGO_PKG_VERSION")), Style::default().fg(app.theme.primary)),
+        ]),
+        Line::from(vec![
+            Span::styled("  Latest:  ", Style::default().fg(app.theme.muted)),
+            Span::styled(format!("v{}", version), Style::default().fg(app.theme.success).bold()),
+        ]),
+        Line::from(""),
+        Line::from(Span::styled("  Download and replace the current binary?", Style::default().fg(app.theme.primary))),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("  Enter", Style::default().fg(app.theme.accent).bold()),
+            Span::styled(": update  ", Style::default().fg(app.theme.muted)),
+            Span::styled("Esc", Style::default().fg(app.theme.accent).bold()),
+            Span::styled(": cancel", Style::default().fg(app.theme.muted)),
+        ]),
+    ];
+
+    frame.render_widget(
+        Paragraph::new(lines).block(block).style(Style::default().bg(app.theme.bg)),
+        popup_area,
+    );
+}
+
+fn draw_update_complete(frame: &mut Frame, app: &App, message: &str) {
+    let popup_area = centered_rect(50, 30, frame.area());
+    frame.render_widget(Clear, popup_area);
+
+    let is_error = message.starts_with("Update failed");
+    let (title, color) = if is_error {
+        (" Update Failed ", app.theme.error)
+    } else {
+        (" Update Complete ", app.theme.success)
+    };
+
+    let block = Block::bordered()
+        .title(title)
+        .title_style(Style::default().fg(color).bold())
+        .border_style(Style::default().fg(color))
+        .style(Style::default().bg(app.theme.bg));
+
+    let mut lines = vec![
+        Line::from(""),
+        Line::from(Span::styled(format!("  {}", message), Style::default().fg(app.theme.primary))),
+        Line::from(""),
+    ];
+
+    if !is_error {
+        lines.push(Line::from(Span::styled("  Restart the app to use the new version.", Style::default().fg(app.theme.muted))));
+        lines.push(Line::from(""));
+    }
+
+    lines.push(Line::from(vec![
+        Span::styled("  Enter", Style::default().fg(app.theme.accent).bold()),
+        Span::styled(": close", Style::default().fg(app.theme.muted)),
+    ]));
+
+    frame.render_widget(
+        Paragraph::new(lines).block(block).style(Style::default().bg(app.theme.bg)),
+        popup_area,
     );
 }

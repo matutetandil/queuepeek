@@ -48,6 +48,7 @@ pub enum BgResult {
         messages_a: Result<Vec<MessageInfo>, String>,
         messages_b: Result<Vec<MessageInfo>, String>,
     },
+    UpdateResult(Result<String, String>),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -100,6 +101,8 @@ pub enum Popup {
     AlertConfig,
     AlertAdd,
     AlertLog,
+    ConfirmUpdate,
+    UpdateComplete(String),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -2245,6 +2248,12 @@ impl App {
                         self.alert_log.pop_back();
                     }
                     self.set_status(format!("Alert '{}' fired — {}", alert_name, webhook_status), false);
+                }
+                BgResult::UpdateResult(Ok(msg)) => {
+                    self.popup = Popup::UpdateComplete(msg);
+                }
+                BgResult::UpdateResult(Err(e)) => {
+                    self.popup = Popup::UpdateComplete(format!("Update failed: {}", e));
                 }
             }
         }
