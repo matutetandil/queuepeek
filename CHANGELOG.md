@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.8.1] - 2026-04-15
+
+### Fixed
+- Self-update no longer corrupts the TUI by redirecting stdout during download
+- GitHub Pages documentation site ready at matutetandil.github.io/queuepeek
+
+---
+
 ## [0.8.0] - 2026-04-15
 
 ### Added
