@@ -22,13 +22,22 @@ Browse queues, read messages, publish, diff, dump, replay, and manage your broke
 - **5 color themes** — with live preview picker
 - **Scheduling** — delayed message publishing with persistent timers
 
-## Quick start
+## Install
+
+### Pre-built binaries
+
+Download from [GitHub Releases](https://github.com/matutetandil/queuepeek/releases) — available for macOS (ARM/Intel), Linux (x86/ARM), and Windows (x86/ARM).
+
+### From crates.io
 
 ```bash
-# Install (requires cmake for librdkafka)
+# Requires cmake for librdkafka
 cargo install queuepeek
+```
 
-# Or build from source
+### From source
+
+```bash
 git clone https://github.com/matutetandil/queuepeek.git
 cd queuepeek && cargo build --release
 ./target/release/queuepeek
@@ -64,7 +73,7 @@ See the [full configuration guide](docs/configuration.md) for TLS, MQTT topics, 
 |-----|-----------|-------------|--------|
 | `j/k` | Navigate | Navigate | Scroll |
 | `Enter` | Open queue | Open message | — |
-| `/` | Filter | Filter | — |
+| `/` | Filter | Filter | Search payload |
 | `Shift+P` | Publish | Publish | — |
 | `p` | — | — | Pretty-print |
 | `b` | — | — | Base64/gzip decode |
