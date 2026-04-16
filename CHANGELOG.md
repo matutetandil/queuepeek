@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.8.5] - 2026-04-16
+
+### Improved
+- Queue list columns now use fixed widths with consistent spacing
+  - Proper gaps between message count, rates, consumers, state, and sparkline
+  - Columns stay stable as data refreshes — no more shifting layout
+- Marquee scrolling for long queue names that don't fit
+  - Names scroll horizontally every 2 seconds with seamless looping
+  - Short names display normally without scrolling
+
+---
+
 ## [0.8.4] - 2026-04-16
 
 ### Improved

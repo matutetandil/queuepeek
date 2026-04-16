@@ -364,6 +364,9 @@ pub struct App {
     // Rate history for sparklines
     pub rate_history: HashMap<String, RateHistory>,
 
+    // Marquee tick counter (increments every ~2s)
+    pub marquee_tick: usize,
+
     // Queue comparison
     pub compare_queue_a: String,
     pub comparison_result: Option<QueueComparisonResult>,
@@ -724,6 +727,7 @@ impl App {
             save_template_name: String::new(),
             template_counter: 0,
             rate_history: HashMap::new(),
+            marquee_tick: 0,
             compare_queue_a: String::new(),
             comparison_result: None,
             comparison_tab: ComparisonTab::Summary,

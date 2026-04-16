@@ -51,6 +51,7 @@ fn main() -> io::Result<()> {
 
 fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App) -> io::Result<()> {
     let mut last_refresh = Instant::now();
+    let mut last_marquee = Instant::now();
 
     // Trigger initial update check
     app.update_checker.start_check();
@@ -64,6 +65,12 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App)
         // Periodic update check
         if app.update_checker.should_check() {
             app.update_checker.start_check();
+        }
+
+        // Marquee tick every 2 seconds
+        if last_marquee.elapsed() >= Duration::from_secs(2) {
+            app.marquee_tick = app.marquee_tick.wrapping_add(1);
+            last_marquee = Instant::now();
         }
 
         // Auto-refresh every 5 seconds

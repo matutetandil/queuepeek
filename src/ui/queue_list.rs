@@ -137,6 +137,14 @@ fn draw_list(frame: &mut Frame, app: &mut App, area: Rect) {
 
     let inner_width = area.width.saturating_sub(2) as usize; // account for borders
 
+    // Fixed column widths (content + gap)
+    //   msgs: 6 chars + 2 gap  = 8
+    //   rates: 13 chars + 2 gap = 15
+    //   consumers: 4 chars + 2 gap = 6
+    //   state: 7 chars + 1 gap = 8
+    //   sparkline: 8 chars + 1 = 9
+    let right_width = 8 + 15 + 6 + 8 + 9; // 46
+
     let items: Vec<ListItem> = app
         .filtered_queue_indices
         .iter()
@@ -151,9 +159,9 @@ fn draw_list(frame: &mut Frame, app: &mut App, area: Rect) {
                 app.theme.accent
             };
 
-            let msg_text = format!("({})", q.messages);
+            let msg_text = format!("{}", q.messages);
             let rate_text = if q.publish_rate > 0.0 || q.deliver_rate > 0.0 {
-                format!(" ↑{:.0}/s ↓{:.0}/s", q.publish_rate, q.deliver_rate)
+                format!("↑{:.0}/s ↓{:.0}/s", q.publish_rate, q.deliver_rate)
             } else {
                 String::new()
             };
@@ -166,47 +174,44 @@ fn draw_list(frame: &mut Frame, app: &mut App, area: Rect) {
                 .unwrap_or_else(|| " ".repeat(sparkline_width));
             let has_activity = !sparkline_str.trim().is_empty();
 
-            // Right side stats
-            let right = format!("  {}{}  {}  {}  {}", msg_text, rate_text, consumers_text, q.state, sparkline_str);
-            let right_len = right.len();
-
-            // Left side: queue name, truncated if needed
-            let max_name_len = inner_width.saturating_sub(right_len + 2);
-            let name = if q.name.len() > max_name_len {
-                format!("{}…", &q.name[..max_name_len.saturating_sub(1)])
+            // Left side: queue name with marquee for long names
+            let max_name_len = inner_width.saturating_sub(right_width + 4);
+            let name = if q.name.len() > max_name_len && max_name_len > 3 {
+                // Marquee: scroll through the name
+                let padded = format!("{}   {}", q.name, q.name);
+                let scroll_pos = app.marquee_tick % (q.name.len() + 3);
+                let end = (scroll_pos + max_name_len).min(padded.len());
+                padded[scroll_pos..end].to_string()
             } else {
                 q.name.clone()
             };
 
-            let padding = inner_width.saturating_sub(name.len() + right_len + 2);
+            let name_padding = max_name_len.saturating_sub(name.len());
 
             let line = Line::from(vec![
                 Span::styled(
                     format!("  {}", name),
                     Style::default().fg(app.theme.primary),
                 ),
+                Span::raw(" ".repeat(name_padding)),
                 Span::styled(
-                    " ".repeat(padding),
-                    Style::default(),
-                ),
-                Span::styled(
-                    msg_text,
+                    format!("{:>6}  ", msg_text),
                     Style::default().fg(msg_color).bold(),
                 ),
                 Span::styled(
-                    rate_text,
+                    format!("{:<13}  ", rate_text),
                     Style::default().fg(app.theme.muted),
                 ),
                 Span::styled(
-                    format!("  {}", consumers_text),
+                    format!("{:>4}  ", consumers_text),
                     Style::default().fg(app.theme.primary),
                 ),
                 Span::styled(
-                    format!("  {}", q.state),
+                    format!("{:<7} ", q.state),
                     Style::default().fg(if q.state == "running" { app.theme.success } else { app.theme.muted }),
                 ),
                 Span::styled(
-                    format!(" {}", sparkline_str),
+                    format!("{:>8} ", sparkline_str),
                     Style::default().fg(if has_activity { app.theme.accent } else { app.theme.muted }),
                 ),
             ]);
