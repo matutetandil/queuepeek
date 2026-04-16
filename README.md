@@ -82,6 +82,7 @@ See the [full configuration guide](docs/configuration.md) for TLS, MQTT topics, 
 | `p` | — | — | Pretty-print |
 | `b` | — | — | Base64/gzip decode |
 | `s` | — | — | Schema Registry decode |
+| `e`/`E` | — | Export / pretty | — |
 | `Space` | — | Toggle select | — |
 | `i` | Queue info | — | — |
 | `Shift+G` | Consumer groups | — | — |

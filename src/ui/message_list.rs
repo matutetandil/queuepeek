@@ -237,6 +237,8 @@ fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
         Span::styled(":del ", ds),
         Span::styled("e", ks),
         Span::styled(":export ", ds),
+        Span::styled("E", ks),
+        Span::styled(":pretty ", ds),
         Span::styled("W", ks),
         Span::styled(":dump ", ds),
         Span::styled("I", ks),

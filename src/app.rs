@@ -107,7 +107,7 @@ pub enum Popup {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum FilePickerMode {
-    Export,
+    Export { pretty: bool },
     Import,
 }
 
@@ -1127,7 +1127,7 @@ impl App {
         let timestamp = chrono_timestamp();
         self.file_picker_show_hidden = false;
         match mode {
-            FilePickerMode::Export => {
+            FilePickerMode::Export { .. } => {
                 self.file_picker_filename = format!("queuepeek-export-{}.json", timestamp);
                 self.file_picker_show_files = false;
             }
@@ -1141,7 +1141,7 @@ impl App {
         self.popup = Popup::FilePicker(mode);
     }
 
-    pub fn export_messages_to_path(&self, path: &std::path::Path) -> Result<String, String> {
+    pub fn export_messages_to_path(&self, path: &std::path::Path, pretty: bool) -> Result<String, String> {
         let messages = self.get_target_messages();
         if messages.is_empty() {
             return Err("No messages to export".into());
@@ -1152,15 +1152,42 @@ impl App {
         let mut writer = std::io::BufWriter::new(file);
 
         use std::io::Write;
-        writeln!(writer, "[").map_err(|e| format!("Writing: {}", e))?;
-        for (i, m) in messages.iter().enumerate() {
-            let json = message_to_json(m);
-            let comma = if i + 1 < messages.len() { "," } else { "" };
-            writeln!(writer, "  {}{}", json, comma).map_err(|e| format!("Writing: {}", e))?;
+        if pretty {
+            let json_values: Vec<serde_json::Value> = messages.iter()
+                .map(|m| {
+                    let headers: serde_json::Map<String, serde_json::Value> = m.headers.iter()
+                        .map(|(k, v)| (k.clone(), serde_json::Value::String(v.clone())))
+                        .collect();
+                    // Parse body as JSON if possible, so it gets pretty-printed as nested object
+                    let body_val = serde_json::from_str::<serde_json::Value>(&m.body)
+                        .unwrap_or_else(|_| serde_json::Value::String(m.body.clone()));
+                    serde_json::json!({
+                        "index": m.index,
+                        "routing_key": m.routing_key,
+                        "exchange": m.exchange,
+                        "redelivered": m.redelivered,
+                        "timestamp": m.timestamp,
+                        "content_type": m.content_type,
+                        "headers": headers,
+                        "body": body_val,
+                    })
+                })
+                .collect();
+            let output = serde_json::to_string_pretty(&json_values)
+                .map_err(|e| format!("Serializing: {}", e))?;
+            write!(writer, "{}", output).map_err(|e| format!("Writing: {}", e))?;
+        } else {
+            writeln!(writer, "[").map_err(|e| format!("Writing: {}", e))?;
+            for (i, m) in messages.iter().enumerate() {
+                let json = message_to_json(m);
+                let comma = if i + 1 < messages.len() { "," } else { "" };
+                writeln!(writer, "  {}{}", json, comma).map_err(|e| format!("Writing: {}", e))?;
+            }
+            writeln!(writer, "]").map_err(|e| format!("Writing: {}", e))?;
         }
-        writeln!(writer, "]").map_err(|e| format!("Writing: {}", e))?;
 
-        Ok(format!("Exported {} messages to {}", messages.len(), path.display()))
+        let label = if pretty { "Exported (pretty)" } else { "Exported" };
+        Ok(format!("{} {} messages to {}", label, messages.len(), path.display()))
     }
 
     /// Dump entire queue to JSONL file (streaming, low memory)

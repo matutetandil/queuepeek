@@ -164,6 +164,7 @@ fn draw_help(frame: &mut Frame, app: &App) {
                 ("D", "Delete selected"),
                 ("d", "Diff two selected messages"),
                 ("e", "Export selected to JSON"),
+                ("E", "Export selected (pretty)"),
                 ("W", "Dump queue to JSONL"),
                 ("I", "Import from JSONL/JSON"),
                 ("T", "Toggle tail / auto-refresh"),
@@ -1926,7 +1927,8 @@ fn draw_file_picker(frame: &mut Frame, app: &App) {
     frame.render_widget(Clear, popup_area);
 
     let title = match app.popup {
-        Popup::FilePicker(crate::app::FilePickerMode::Export) => " Export — Choose Location ",
+        Popup::FilePicker(crate::app::FilePickerMode::Export { pretty: true }) => " Export (pretty) — Choose Location ",
+        Popup::FilePicker(crate::app::FilePickerMode::Export { pretty: false }) => " Export — Choose Location ",
         Popup::FilePicker(crate::app::FilePickerMode::Import) => " Import — Choose File ",
         _ => " Save File ",
     };

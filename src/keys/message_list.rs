@@ -127,7 +127,12 @@ pub fn handle_message_list_key(app: &mut App, code: KeyCode, modifiers: KeyModif
         }
         KeyCode::Char('e') => {
             if app.selection_count() > 0 {
-                app.open_file_picker(crate::app::FilePickerMode::Export);
+                app.open_file_picker(crate::app::FilePickerMode::Export { pretty: false });
+            }
+        }
+        KeyCode::Char('E') => {
+            if app.selection_count() > 0 {
+                app.open_file_picker(crate::app::FilePickerMode::Export { pretty: true });
             }
         }
         KeyCode::Char('W') => {

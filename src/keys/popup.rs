@@ -700,8 +700,8 @@ pub fn handle_popup_key(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
                     KeyCode::Enter => {
                         let path = app.file_picker_dir.join(&app.file_picker_filename);
                         match mode {
-                            app::FilePickerMode::Export => {
-                                match app.export_messages_to_path(&path) {
+                            app::FilePickerMode::Export { pretty } => {
+                                match app.export_messages_to_path(&path, pretty) {
                                     Ok(msg) => app.set_status(msg, false),
                                     Err(e) => app.set_status(e, true),
                                 }

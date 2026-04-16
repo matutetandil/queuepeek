@@ -1,10 +1,16 @@
 # Changelog
 
-## [0.8.1] - 2026-04-15
+## [0.8.2] - 2026-04-16
+
+### Added
+- Pretty export (`Shift+E`) with fully indented JSON including nested body objects
+  - JSON message bodies are parsed and exported as nested objects instead of escaped strings
+  - Non-JSON bodies fall back to string representation
+  - Compact export (`e`) unchanged
 
 ### Fixed
 - Self-update no longer corrupts the TUI by redirecting stdout during download
-- GitHub Pages documentation site ready at matutetandil.github.io/queuepeek
+- Windows build fixed with platform-specific stdout suppression
 
 ---
 
