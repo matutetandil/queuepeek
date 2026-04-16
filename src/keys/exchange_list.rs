@@ -77,6 +77,19 @@ pub fn handle_exchange_list_key(app: &mut App, code: KeyCode, modifiers: KeyModi
                 }
             }
         }
+        KeyCode::Char('a') => {
+            app.exchange_form_name.clear();
+            app.exchange_form_type = 0;
+            app.exchange_form_durable = true;
+            app.exchange_form_focused = 0;
+            app.popup = Popup::AddExchange;
+        }
+        KeyCode::Char('D') => {
+            let flat = super::popup::topology_flat_list(app);
+            if let Some(super::popup::TopologyFlatItem::Exchange(ref name)) = flat.get(app.topology_selected) {
+                app.popup = Popup::ConfirmDeleteExchange(name.clone());
+            }
+        }
         KeyCode::Char('i') => {
             let flat = super::popup::topology_flat_list(app);
             if let Some(super::popup::TopologyFlatItem::Exchange(ref name)) = flat.get(app.topology_selected) {

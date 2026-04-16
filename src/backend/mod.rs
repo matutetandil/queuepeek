@@ -175,6 +175,16 @@ pub trait Backend: Send {
         Err("Queue detail not supported by this backend".into())
     }
 
+    /// Create an exchange
+    fn create_exchange(&self, _namespace: &str, _name: &str, _exchange_type: &str, _durable: bool) -> Result<(), String> {
+        Err("Not supported".into())
+    }
+
+    /// Delete an exchange
+    fn delete_exchange(&self, _namespace: &str, _name: &str) -> Result<(), String> {
+        Err("Not supported".into())
+    }
+
     /// List exchanges in namespace (for topology view)
     fn list_exchanges(&self, _namespace: &str) -> Result<Vec<ExchangeInfo>, String> {
         Err("Exchange listing not supported by this backend".into())

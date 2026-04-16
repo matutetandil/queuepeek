@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.10.0] - 2026-04-16
+
+### Added
+- Full exchange management screen (`X` from queue list, RabbitMQ only)
+  - Browse all exchanges with expand/collapse to see bindings
+  - Filter exchanges with `/` search
+  - Exchange info popup with `i` (type, durability, bindings list)
+  - Create exchanges with `a` (name, type: direct/fanout/topic/headers, durable toggle)
+  - Delete exchanges with `D` (confirmation prompt)
+  - Create bindings with `b` (queue + routing key form)
+  - Delete bindings with `d`
+  - Auto-refresh every 5 seconds with live pulse indicator
+  - Scroll preserves position across refreshes
+  - Hide expand arrow for exchanges with no bindings
+- Queue bindings section in queue info popup (`i`)
+  - Shows which exchanges feed the queue with their routing keys
+- Scroll clamping in queue info popup (no more scrolling past content)
+- Sticky footer in queue info popup (hints stay at bottom)
+- Queue info scroll preserved on auto-refresh (no jump to top)
+
+---
+
 ## [0.9.0] - 2026-04-16
 
 ### Added

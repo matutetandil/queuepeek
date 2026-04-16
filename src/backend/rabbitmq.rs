@@ -581,6 +581,33 @@ impl Backend for RabbitMqBackend {
         Ok(sections)
     }
 
+    fn create_exchange(&self, namespace: &str, name: &str, exchange_type: &str, durable: bool) -> Result<(), String> {
+        let vhost = urlencoding::encode(namespace);
+        let exchange = urlencoding::encode(name);
+        let path = format!("/api/exchanges/{}/{}", vhost, exchange);
+        let body = serde_json::json!({
+            "type": exchange_type,
+            "durable": durable,
+            "auto_delete": false,
+            "internal": false,
+            "arguments": {}
+        });
+        self.client
+            .put(format!("{}{}", self.base_url, path))
+            .basic_auth(&self.username, Some(&self.password))
+            .json(&body)
+            .send()
+            .map_err(|e| format!("Creating exchange: {}", e))?;
+        Ok(())
+    }
+
+    fn delete_exchange(&self, namespace: &str, name: &str) -> Result<(), String> {
+        let vhost = urlencoding::encode(namespace);
+        let exchange = urlencoding::encode(name);
+        let path = format!("/api/exchanges/{}/{}", vhost, exchange);
+        self.http_delete(&path)
+    }
+
     fn list_exchanges(&self, namespace: &str) -> Result<Vec<ExchangeInfo>, String> {
         let vhost = urlencoding::encode(namespace);
         let url = format!("{}/api/exchanges/{}", self.base_url, vhost);

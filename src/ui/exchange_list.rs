@@ -224,6 +224,8 @@ fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
         Span::styled(" ", Style::default()),
         Span::styled("j/k", ks), Span::styled(":nav ", ds),
         Span::styled("⏎", ks), Span::styled(":expand ", ds),
+        Span::styled("a", ks), Span::styled(":add ", ds),
+        Span::styled("D", ks), Span::styled(":delete ", ds),
         Span::styled("b", ks), Span::styled(":bind ", ds),
         Span::styled("d", ks), Span::styled(":unbind ", ds),
         Span::styled("/", ks), Span::styled(":filter ", ds),

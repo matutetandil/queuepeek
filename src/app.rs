@@ -44,6 +44,8 @@ pub enum BgResult {
     AlertMatch { alert_name: String, queue: String, message_preview: String, webhook_status: String },
     BindingCreated(Result<(), String>),
     BindingDeleted(Result<(), String>),
+    ExchangeCreated(Result<(), String>),
+    ExchangeDeleted(Result<(), String>),
     CompareMessages {
         queue_a: String,
         queue_b: String,
@@ -97,6 +99,8 @@ pub enum Popup {
     ReplayConfig,
     AddBinding { exchange: String },
     ExchangeInfo(String), // exchange name
+    AddExchange,
+    ConfirmDeleteExchange(String), // exchange name
     BenchmarkConfig,
     BenchmarkRunning,
     RetainedMessages,
@@ -129,6 +133,7 @@ pub enum QueueOperation {
 }
 
 pub const FETCH_PRESETS: &[u32] = &[10, 25, 50, 100, 250, 500];
+pub const EXCHANGE_TYPES: &[&str] = &["direct", "fanout", "topic", "headers"];
 
 pub const SCHEDULE_PRESETS: &[(u64, &str)] = &[
     (30, "30 seconds"),
@@ -370,6 +375,12 @@ pub struct App {
     pub binding_form_queue: String,
     pub binding_form_routing_key: String,
     pub binding_form_focused: usize,
+
+    // Exchange form
+    pub exchange_form_name: String,
+    pub exchange_form_type: usize,  // index into EXCHANGE_TYPES
+    pub exchange_form_durable: bool,
+    pub exchange_form_focused: usize, // 0=name, 1=type, 2=durable
 
     // Benchmark
     pub bench_count: String,
@@ -741,6 +752,10 @@ impl App {
             filtered_exchange_indices: Vec::new(),
             binding_form_queue: String::new(),
             binding_form_routing_key: String::new(),
+            exchange_form_name: String::new(),
+            exchange_form_type: 0,
+            exchange_form_durable: true,
+            exchange_form_focused: 0,
             binding_form_focused: 0,
             bench_count: "1000".to_string(),
             bench_concurrency: "1".to_string(),
@@ -2279,6 +2294,23 @@ impl App {
                 }
                 BgResult::BindingDeleted(Err(e)) => {
                     self.set_status(format!("Delete binding failed: {}", e), true);
+                }
+                BgResult::ExchangeCreated(Ok(())) => {
+                    self.set_status("Exchange created", false);
+                    self.popup = Popup::None;
+                    self.load_topology();
+                }
+                BgResult::ExchangeCreated(Err(e)) => {
+                    self.set_status(format!("Create exchange failed: {}", e), true);
+                }
+                BgResult::ExchangeDeleted(Ok(())) => {
+                    self.set_status("Exchange deleted", false);
+                    self.popup = Popup::None;
+                    self.load_topology();
+                }
+                BgResult::ExchangeDeleted(Err(e)) => {
+                    self.set_status(format!("Delete exchange failed: {}", e), true);
+                    self.popup = Popup::None;
                 }
                 BgResult::BenchmarkProgress { completed, total, _latency_ms: _ } => {
                     self.bench_progress = (completed, total);

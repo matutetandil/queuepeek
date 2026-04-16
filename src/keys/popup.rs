@@ -468,6 +468,79 @@ pub fn handle_popup_key(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
                 _ => {}
             }
         }
+        Popup::AddExchange => {
+            match code {
+                KeyCode::Esc => {
+                    app.popup = Popup::None;
+                }
+                KeyCode::Tab | KeyCode::Down => {
+                    app.exchange_form_focused = (app.exchange_form_focused + 1) % 3;
+                }
+                KeyCode::BackTab | KeyCode::Up => {
+                    app.exchange_form_focused = (app.exchange_form_focused + 2) % 3;
+                }
+                KeyCode::Enter => {
+                    if app.exchange_form_focused == 1 {
+                        // Cycle exchange type
+                        app.exchange_form_type = (app.exchange_form_type + 1) % app::EXCHANGE_TYPES.len();
+                    } else if app.exchange_form_focused == 2 {
+                        // Toggle durable
+                        app.exchange_form_durable = !app.exchange_form_durable;
+                    } else if !app.exchange_form_name.is_empty() {
+                        // Create exchange
+                        let name = app.exchange_form_name.clone();
+                        let ex_type = app::EXCHANGE_TYPES[app.exchange_form_type].to_string();
+                        let durable = app.exchange_form_durable;
+                        if let Some(ref backend) = app.backend {
+                            let backend = backend.clone_backend();
+                            let namespace = app.selected_namespace.clone();
+                            let tx = app.bg_sender.clone();
+                            std::thread::spawn(move || {
+                                let result = backend.create_exchange(&namespace, &name, &ex_type, durable);
+                                let _ = tx.send(app::BgResult::ExchangeCreated(result));
+                            });
+                            app.set_status("Creating exchange...", false);
+                        }
+                    }
+                }
+                KeyCode::Char(c) if app.exchange_form_focused == 0 => {
+                    app.exchange_form_name.push(c);
+                }
+                KeyCode::Backspace if app.exchange_form_focused == 0 => {
+                    app.exchange_form_name.pop();
+                }
+                KeyCode::Char(' ') if app.exchange_form_focused == 1 => {
+                    app.exchange_form_type = (app.exchange_form_type + 1) % app::EXCHANGE_TYPES.len();
+                }
+                KeyCode::Char(' ') if app.exchange_form_focused == 2 => {
+                    app.exchange_form_durable = !app.exchange_form_durable;
+                }
+                _ => {}
+            }
+        }
+        Popup::ConfirmDeleteExchange(ref name) => {
+            let name = name.clone();
+            match code {
+                KeyCode::Enter | KeyCode::Char('y') | KeyCode::Char('Y') => {
+                    if let Some(ref backend) = app.backend {
+                        let backend = backend.clone_backend();
+                        let namespace = app.selected_namespace.clone();
+                        let tx = app.bg_sender.clone();
+                        let exchange_name = name.clone();
+                        std::thread::spawn(move || {
+                            let result = backend.delete_exchange(&namespace, &exchange_name);
+                            let _ = tx.send(app::BgResult::ExchangeDeleted(result));
+                        });
+                        app.set_status(format!("Deleting exchange {}...", name), false);
+                    }
+                    app.popup = Popup::None;
+                }
+                KeyCode::Esc | KeyCode::Char('n') | KeyCode::Char('N') => {
+                    app.popup = Popup::None;
+                }
+                _ => {}
+            }
+        }
         Popup::ExchangeInfo(_) => {
             match code {
                 KeyCode::Esc | KeyCode::Char('i') | KeyCode::Enter => {

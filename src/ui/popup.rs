@@ -56,6 +56,11 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
             );
             draw_confirm(frame, app, "DLQ Re-route", &msg);
         }
+        Popup::AddExchange => draw_add_exchange(frame, app),
+        Popup::ConfirmDeleteExchange(ref name) => {
+            let msg = format!("Delete exchange '{}'?\n\nThis will remove the exchange and all its bindings.", name);
+            draw_confirm(frame, app, "Delete Exchange", &msg);
+        }
         Popup::ExchangeInfo(ref name) => {
             let name = name.clone();
             draw_exchange_info(frame, app, &name);
@@ -2328,5 +2333,65 @@ fn draw_exchange_info(frame: &mut Frame, app: &App, exchange_name: &str) {
     frame.render_widget(
         Paragraph::new(footer).style(Style::default().bg(app.theme.bg)),
         chunks[1],
+    );
+}
+
+fn draw_add_exchange(frame: &mut Frame, app: &App) {
+    let popup_area = centered_rect(50, 40, frame.area());
+    frame.render_widget(Clear, popup_area);
+
+    let block = Block::bordered()
+        .title(" Create Exchange ")
+        .title_style(Style::default().fg(app.theme.accent).bold())
+        .border_style(Style::default().fg(app.theme.accent))
+        .style(Style::default().bg(app.theme.bg));
+    let inner = block.inner(popup_area);
+    frame.render_widget(block, popup_area);
+
+    let ks = Style::default().fg(app.theme.accent);
+    let ds = Style::default().fg(app.theme.muted);
+    let vs = Style::default().fg(app.theme.white);
+    let focused_label = Style::default().fg(app.theme.accent).bold();
+
+    let ex_type = crate::app::EXCHANGE_TYPES[app.exchange_form_type];
+
+    let name_label = if app.exchange_form_focused == 0 { focused_label } else { ks };
+    let type_label = if app.exchange_form_focused == 1 { focused_label } else { ks };
+    let dur_label = if app.exchange_form_focused == 2 { focused_label } else { ks };
+
+    let cursor = if app.exchange_form_focused == 0 { "▎" } else { "" };
+    let type_indicator = if app.exchange_form_focused == 1 { " ◂ ▸" } else { "" };
+    let dur_toggle = if app.exchange_form_durable { "[x]" } else { "[ ]" };
+
+    let lines = vec![
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("  Name:    ", name_label),
+            Span::styled(format!("{}{}", app.exchange_form_name, cursor), vs),
+        ]),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("  Type:    ", type_label),
+            Span::styled(ex_type, vs),
+            Span::styled(type_indicator, ds),
+        ]),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("  Durable: ", dur_label),
+            Span::styled(dur_toggle, vs),
+        ]),
+        Line::from(""),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("  Tab", ks), Span::styled(":next  ", ds),
+            Span::styled("Enter", ks), Span::styled(":select/create  ", ds),
+            Span::styled("Space", ks), Span::styled(":toggle  ", ds),
+            Span::styled("Esc", ks), Span::styled(":cancel", ds),
+        ]),
+    ];
+
+    frame.render_widget(
+        Paragraph::new(lines).style(Style::default().bg(app.theme.bg)),
+        inner,
     );
 }

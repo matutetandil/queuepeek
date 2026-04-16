@@ -86,7 +86,7 @@ See the [full configuration guide](docs/configuration.md) for TLS, MQTT topics, 
 | `Space` | — | Toggle select | — |
 | `i` | Queue info | — | — |
 | `Shift+G` | Consumer groups | — | — |
-| `Shift+X` | Topology | — | — |
+| `Shift+X` | Exchanges | — | — |
 | `F5` | Benchmark | — | — |
 | `n`/`N` | — | — | Next/prev match |
 | `?` | Help | Help | Help |
