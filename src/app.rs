@@ -101,6 +101,7 @@ pub enum Popup {
     AlertAdd,
     AlertLog,
     ConfirmUpdate,
+    Updating,
     UpdateComplete(String),
     FilePicker(FilePickerMode),
 }

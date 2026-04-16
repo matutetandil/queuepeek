@@ -51,7 +51,16 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         .style(Style::default().bg(theme.bg));
     frame.render_widget(logo_widget, logo_area);
 
-    // Content area below logo
+    // Version tag below logo
+    let version_text = format!("v{}", env!("CARGO_PKG_VERSION"));
+    let version_area = Rect::new(inner.x, inner.y + logo_height, inner.width, 1);
+    frame.render_widget(
+        Paragraph::new(Span::styled(version_text, Style::default().fg(theme.muted).bg(theme.bg)))
+            .alignment(ratatui::layout::Alignment::Center),
+        version_area,
+    );
+
+    // Content area below logo + version
     let content_y = inner.y + logo_height + 1;
     let content_height = inner.height.saturating_sub(logo_height + 3); // +3 for gap and 2-line footer
     let content_area = Rect::new(inner.x, content_y, inner.width, content_height);

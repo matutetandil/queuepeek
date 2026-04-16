@@ -774,19 +774,21 @@ pub fn handle_popup_key(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
         Popup::ConfirmUpdate => {
             match code {
                 KeyCode::Enter | KeyCode::Char('y') | KeyCode::Char('Y') => {
-                    app.set_status("Downloading update...", false);
+                    app.popup = Popup::Updating;
                     let tx = app.bg_sender.clone();
                     std::thread::spawn(move || {
                         let result = crate::updater::perform_update();
                         let _ = tx.send(crate::app::BgResult::UpdateResult(result));
                     });
-                    app.popup = Popup::None;
                 }
                 KeyCode::Esc | KeyCode::Char('n') | KeyCode::Char('N') => {
                     app.popup = Popup::None;
                 }
                 _ => {}
             }
+        }
+        Popup::Updating => {
+            // Block all input while updating
         }
         Popup::UpdateComplete(_) => {
             match code {

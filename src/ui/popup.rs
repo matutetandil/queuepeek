@@ -58,6 +58,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         }
         Popup::FilePicker(_) => draw_file_picker(frame, app),
         Popup::ConfirmUpdate => draw_confirm_update(frame, app),
+        Popup::Updating => draw_updating(frame, app),
         Popup::UpdateComplete(ref msg) => {
             let msg = msg.clone();
             draw_update_complete(frame, app, &msg);
@@ -2081,6 +2082,29 @@ fn draw_file_picker(frame: &mut Frame, app: &App) {
     frame.render_widget(
         Paragraph::new(hints).style(Style::default().bg(app.theme.bg)),
         chunks[6],
+    );
+}
+
+fn draw_updating(frame: &mut Frame, app: &App) {
+    let popup_area = centered_rect(50, 20, frame.area());
+    frame.render_widget(Clear, popup_area);
+
+    let block = Block::bordered()
+        .title(" Updating ")
+        .title_style(Style::default().fg(app.theme.accent).bold())
+        .border_style(Style::default().fg(app.theme.accent))
+        .style(Style::default().bg(app.theme.bg));
+
+    let lines = vec![
+        Line::from(""),
+        Line::from(Span::styled("  Downloading and installing update...", Style::default().fg(app.theme.primary))),
+        Line::from(""),
+        Line::from(Span::styled("  Please wait.", Style::default().fg(app.theme.muted))),
+    ];
+
+    frame.render_widget(
+        Paragraph::new(lines).block(block).style(Style::default().bg(app.theme.bg)),
+        popup_area,
     );
 }
 

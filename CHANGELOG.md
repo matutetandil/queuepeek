@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.8.3] - 2026-04-16
+
+### Added
+- Version displayed in UI
+  - Profile screen: centered below logo
+  - All other screens: right-aligned in header bar (`queuepeek vX.Y.Z`)
+  - Auto-hides when terminal is too narrow to avoid overlapping header content
+- Update flow with visual feedback
+  - "Updating..." popup blocks input during download
+  - Completion popup shows result and prompts restart
+  - No more TUI corruption or frozen state during updates
+
+### Fixed
+- Update popup no longer closes immediately leaving no feedback
+
+---
+
 ## [0.8.2] - 2026-04-16
 
 ### Added

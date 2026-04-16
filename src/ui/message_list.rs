@@ -19,7 +19,8 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     ])
     .split(area);
 
-    draw_header(frame, app, chunks[0]);
+    let hw = draw_header(frame, app, chunks[0]);
+    super::draw_version_tag(frame, app, chunks[0], hw);
     draw_list(frame, app, chunks[1]);
     draw_footer(frame, app, chunks[2]);
 
@@ -30,11 +31,11 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
 
 // ─── Header Bar ───────────────────────────────────────────────────────────
 
-fn draw_header(frame: &mut Frame, app: &App, area: Rect) {
+fn draw_header(frame: &mut Frame, app: &App, area: Rect) -> u16 {
     let sep = Span::styled(" › ", Style::default().fg(app.theme.divider).bg(app.theme.sidebar_bg));
     let muted = Style::default().fg(app.theme.muted).bg(app.theme.sidebar_bg);
 
-    let line = Line::from(vec![
+    let spans = vec![
         Span::styled(format!("  {} ", app.profile_name), muted),
         sep.clone(),
         Span::styled(format!("{} ", app.selected_namespace), muted),
@@ -63,12 +64,15 @@ fn draw_header(frame: &mut Frame, app: &App, area: Rect) {
         } else {
             Span::raw("")
         },
-    ]);
+    ];
+    let content_width: u16 = spans.iter().map(|s| s.content.len() as u16).sum();
+    let line = Line::from(spans);
 
     frame.render_widget(
         Paragraph::new(line).style(Style::default().bg(app.theme.sidebar_bg)),
         area,
     );
+    content_width
 }
 
 // ─── Message List ─────────────────────────────────────────────────────────

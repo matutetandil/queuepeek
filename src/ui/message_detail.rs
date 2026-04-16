@@ -18,7 +18,8 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     ])
     .split(area);
 
-    draw_header(frame, app, chunks[0]);
+    let hw = draw_header(frame, app, chunks[0]);
+    super::draw_version_tag(frame, app, chunks[0], hw);
     draw_content(frame, app, chunks[1]);
     if has_search_bar {
         draw_search_bar(frame, app, chunks[2]);
@@ -30,21 +31,21 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     }
 }
 
-fn draw_header(frame: &mut Frame, app: &App, area: Rect) {
+fn draw_header(frame: &mut Frame, app: &App, area: Rect) -> u16 {
     let msg = match app.messages.get(app.detail_message_idx) {
         Some(m) => m,
         None => {
             let bar = Paragraph::new("  Message not found")
                 .style(Style::default().fg(app.theme.primary).bg(app.theme.sidebar_bg));
             frame.render_widget(bar, area);
-            return;
+            return 20;
         }
     };
 
     let total = app.messages.len();
     let position = app.detail_message_idx + 1;
 
-    let header = Line::from(vec![
+    let spans = vec![
         Span::styled(
             format!("  {} ", app.profile_name),
             Style::default().fg(app.theme.muted).bg(app.theme.sidebar_bg),
@@ -68,11 +69,14 @@ fn draw_header(frame: &mut Frame, app: &App, area: Rect) {
             format!("({} of {})", position, total),
             Style::default().fg(app.theme.muted).bg(app.theme.sidebar_bg),
         ),
-    ]);
+    ];
+    let content_width: u16 = spans.iter().map(|s| s.content.len() as u16).sum();
+    let header = Line::from(spans);
 
     let bar = Paragraph::new(header)
         .style(Style::default().bg(app.theme.sidebar_bg));
     frame.render_widget(bar, area);
+    content_width
 }
 
 fn draw_content(frame: &mut Frame, app: &mut App, area: Rect) {
