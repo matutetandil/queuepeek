@@ -42,6 +42,8 @@ pub enum BgResult {
     RetainedCleared(Result<String, String>),
     Permissions(Result<Vec<crate::backend::PermissionEntry>, String>),
     AlertMatch { alert_name: String, queue: String, message_preview: String, webhook_status: String },
+    BindingCreated(Result<(), String>),
+    BindingDeleted(Result<(), String>),
     CompareMessages {
         queue_a: String,
         queue_b: String,
@@ -57,6 +59,7 @@ pub enum Screen {
     QueueList,
     MessageList,
     MessageDetail,
+    ExchangeList,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -92,7 +95,8 @@ pub enum Popup {
     TemplatePicker,
     SaveTemplate,
     ReplayConfig,
-    TopologyView,
+    AddBinding { exchange: String },
+    ExchangeInfo(String), // exchange name
     BenchmarkConfig,
     BenchmarkRunning,
     RetainedMessages,
@@ -353,6 +357,19 @@ pub struct App {
     pub topology_exchanges: Vec<crate::backend::ExchangeInfo>,
     pub topology_bindings: Vec<crate::backend::BindingInfo>,
     pub topology_scroll: u16,
+    pub topology_selected: usize,
+    pub topology_expanded: HashSet<String>,
+
+    // Exchange list filter
+    pub exchange_filter: String,
+    pub exchange_filter_active: bool,
+    pub exchange_filter_focused: bool,
+    pub filtered_exchange_indices: Vec<usize>,
+
+    // Add binding form
+    pub binding_form_queue: String,
+    pub binding_form_routing_key: String,
+    pub binding_form_focused: usize,
 
     // Benchmark
     pub bench_count: String,
@@ -716,6 +733,15 @@ impl App {
             topology_exchanges: Vec::new(),
             topology_bindings: Vec::new(),
             topology_scroll: 0,
+            topology_selected: 0,
+            topology_expanded: HashSet::new(),
+            exchange_filter: String::new(),
+            exchange_filter_active: false,
+            exchange_filter_focused: false,
+            filtered_exchange_indices: Vec::new(),
+            binding_form_queue: String::new(),
+            binding_form_routing_key: String::new(),
+            binding_form_focused: 0,
             bench_count: "1000".to_string(),
             bench_concurrency: "1".to_string(),
             bench_focused_field: 0,
@@ -2206,15 +2232,53 @@ impl App {
                     self.set_status(format!("Replay failed: {}", e), true);
                 }
                 BgResult::Topology(Ok((exchanges, bindings))) => {
+                    // Preserve selected exchange name across refresh
+                    let prev_selected_name = {
+                        let flat = crate::keys::popup::topology_flat_list(self);
+                        flat.get(self.topology_selected).map(|item| match item {
+                            crate::keys::popup::TopologyFlatItem::Exchange(ref name) => name.clone(),
+                            crate::keys::popup::TopologyFlatItem::Binding(ref b) => b.source.clone(),
+                        })
+                    };
+
                     self.topology_exchanges = exchanges;
                     self.topology_bindings = bindings;
-                    self.topology_scroll = 0;
+                    self.update_filtered_exchanges();
+
+                    // Restore selection by name
+                    if let Some(ref name) = prev_selected_name {
+                        let flat = crate::keys::popup::topology_flat_list(self);
+                        if let Some(pos) = flat.iter().position(|item| match item {
+                            crate::keys::popup::TopologyFlatItem::Exchange(ref n) => n == name,
+                            _ => false,
+                        }) {
+                            self.topology_selected = pos;
+                        }
+                    }
                     self.loading = false;
                 }
                 BgResult::Topology(Err(e)) => {
-                    self.popup = Popup::None;
                     self.loading = false;
+                    if self.screen == Screen::ExchangeList {
+                        self.screen = Screen::QueueList;
+                    }
                     self.set_status(format!("Topology: {}", e), true);
+                }
+                BgResult::BindingCreated(Ok(())) => {
+                    self.set_status("Binding created", false);
+                    self.popup = Popup::None;
+                    self.load_topology();
+                }
+                BgResult::BindingCreated(Err(e)) => {
+                    self.set_status(format!("Create binding failed: {}", e), true);
+                    self.popup = Popup::None;
+                }
+                BgResult::BindingDeleted(Ok(())) => {
+                    self.set_status("Binding deleted", false);
+                    self.load_topology();
+                }
+                BgResult::BindingDeleted(Err(e)) => {
+                    self.set_status(format!("Delete binding failed: {}", e), true);
                 }
                 BgResult::BenchmarkProgress { completed, total, _latency_ms: _ } => {
                     self.bench_progress = (completed, total);
@@ -2372,6 +2436,14 @@ impl App {
         } else {
             self.set_status(format!("{} of {} queues match", filtered, total), false);
         }
+    }
+
+    pub fn update_filtered_exchanges(&mut self) {
+        let filter = self.exchange_filter.to_lowercase();
+        self.filtered_exchange_indices = self.topology_exchanges.iter().enumerate()
+            .filter(|(_, e)| filter.is_empty() || e.name.to_lowercase().contains(&filter))
+            .map(|(i, _)| i)
+            .collect();
     }
 
     pub fn update_filtered_messages(&mut self) {

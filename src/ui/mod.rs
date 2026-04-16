@@ -3,6 +3,7 @@ pub mod profiles;
 pub mod queue_list;
 pub mod message_list;
 pub mod message_detail;
+pub mod exchange_list;
 pub mod popup;
 
 use ratatui::prelude::*;
@@ -57,5 +58,6 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         Screen::QueueList => queue_list::draw(frame, app),
         Screen::MessageList => message_list::draw(frame, app),
         Screen::MessageDetail => message_detail::draw(frame, app),
+        Screen::ExchangeList => exchange_list::draw(frame, app),
     }
 }

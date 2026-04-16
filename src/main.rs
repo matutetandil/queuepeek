@@ -85,6 +85,9 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App)
                 app.load_messages();
                 app.load_queues(); // refresh queue stats for the activity bar
                 last_refresh = Instant::now();
+            } else if app.screen == Screen::ExchangeList {
+                app.load_topology();
+                last_refresh = Instant::now();
             }
         }
 

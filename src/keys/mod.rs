@@ -2,7 +2,8 @@ mod profile;
 mod queue_list;
 mod message_list;
 mod message_detail;
-mod popup;
+mod exchange_list;
+pub mod popup;
 
 use crossterm::event::{KeyCode, KeyModifiers};
 
@@ -28,5 +29,6 @@ pub fn handle_key(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
         Screen::QueueList     => queue_list::handle_queue_list_key(app, code, modifiers),
         Screen::MessageList   => message_list::handle_message_list_key(app, code, modifiers),
         Screen::MessageDetail => message_detail::handle_message_detail_key(app, code, modifiers),
+        Screen::ExchangeList  => exchange_list::handle_exchange_list_key(app, code, modifiers),
     }
 }

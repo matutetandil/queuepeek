@@ -613,7 +613,8 @@ impl Backend for RabbitMqBackend {
                 source: b["source"].as_str().unwrap_or("").to_string(),
                 destination: b["destination"].as_str().unwrap_or("").to_string(),
                 routing_key: b["routing_key"].as_str().unwrap_or("").to_string(),
-                _destination_type: b["destination_type"].as_str().unwrap_or("queue").to_string(),
+                destination_type: b["destination_type"].as_str().unwrap_or("queue").to_string(),
+                properties_key: b["properties_key"].as_str().unwrap_or("").to_string(),
             }
         }).filter(|b| !b.source.is_empty()) // skip default exchange bindings
         .collect())
@@ -668,6 +669,28 @@ impl Backend for RabbitMqBackend {
         }
 
         Ok(entries)
+    }
+
+    fn create_binding(&self, namespace: &str, exchange: &str, queue: &str, routing_key: &str) -> Result<(), String> {
+        let encoded_ns = urlencoding::encode(namespace);
+        let encoded_ex = urlencoding::encode(exchange);
+        let encoded_q = urlencoding::encode(queue);
+        let path = format!("/api/bindings/{}/e/{}/q/{}", encoded_ns, encoded_ex, encoded_q);
+        let body = serde_json::json!({
+            "routing_key": routing_key,
+            "arguments": {}
+        });
+        self.post_json(&path, &body)?;
+        Ok(())
+    }
+
+    fn delete_binding(&self, namespace: &str, exchange: &str, queue: &str, properties_key: &str) -> Result<(), String> {
+        let encoded_ns = urlencoding::encode(namespace);
+        let encoded_ex = urlencoding::encode(exchange);
+        let encoded_q = urlencoding::encode(queue);
+        let encoded_pk = urlencoding::encode(properties_key);
+        let path = format!("/api/bindings/{}/e/{}/q/{}/{}", encoded_ns, encoded_ex, encoded_q, encoded_pk);
+        self.http_delete(&path)
     }
 
     fn clone_backend(&self) -> Box<dyn Backend> {

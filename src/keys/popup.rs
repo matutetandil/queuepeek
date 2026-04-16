@@ -468,12 +468,62 @@ pub fn handle_popup_key(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
                 _ => {}
             }
         }
-        Popup::TopologyView => {
+        Popup::ExchangeInfo(_) => {
             match code {
-                KeyCode::Esc | KeyCode::Char('X') => {
+                KeyCode::Esc | KeyCode::Char('i') | KeyCode::Enter => {
                     app.popup = Popup::None;
                 }
-                _ => handle_scroll_keys(code, &mut app.topology_scroll, None),
+                _ => {}
+            }
+        }
+        Popup::AddBinding { .. } => {
+            match code {
+                KeyCode::Esc => {
+                    app.popup = Popup::None;
+                }
+                KeyCode::Tab | KeyCode::Down => {
+                    app.binding_form_focused = (app.binding_form_focused + 1) % 2;
+                }
+                KeyCode::BackTab | KeyCode::Up => {
+                    app.binding_form_focused = if app.binding_form_focused == 0 { 1 } else { 0 };
+                }
+                KeyCode::Backspace => {
+                    match app.binding_form_focused {
+                        0 => { app.binding_form_queue.pop(); }
+                        _ => { app.binding_form_routing_key.pop(); }
+                    }
+                }
+                KeyCode::Char(c) if modifiers == KeyModifiers::NONE || modifiers == KeyModifiers::SHIFT => {
+                    match app.binding_form_focused {
+                        0 => app.binding_form_queue.push(c),
+                        _ => app.binding_form_routing_key.push(c),
+                    }
+                }
+                KeyCode::Enter => {
+                    if let Popup::AddBinding { ref exchange } = app.popup {
+                        let exchange = exchange.clone();
+                        let queue = app.binding_form_queue.clone();
+                        let routing_key = app.binding_form_routing_key.clone();
+                        if queue.is_empty() {
+                            app.set_status("Queue name is required", true);
+                        } else if let Some(ref backend) = app.backend {
+                            let backend = backend.clone_backend();
+                            let namespace = app.selected_namespace.clone();
+                            let tx = app.bg_sender.clone();
+                            app.popup = Popup::None;
+                            std::thread::spawn(move || {
+                                let result = backend.create_binding(
+                                    &namespace,
+                                    &exchange,
+                                    &queue,
+                                    &routing_key,
+                                );
+                                let _ = tx.send(crate::app::BgResult::BindingCreated(result));
+                            });
+                        }
+                    }
+                }
+                _ => {}
             }
         }
         Popup::BenchmarkConfig => {
@@ -834,6 +884,44 @@ fn handle_scroll_keys(code: KeyCode, scroll: &mut u16, max_scroll: Option<u16>) 
         if *scroll > max {
             *scroll = max;
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Topology flat list helpers
+// ---------------------------------------------------------------------------
+
+#[derive(Clone)]
+pub enum TopologyFlatItem {
+    Exchange(String),
+    Binding(crate::backend::BindingInfo),
+}
+
+pub fn topology_flat_list(app: &App) -> Vec<TopologyFlatItem> {
+    let use_filter = !app.exchange_filter.is_empty();
+    let mut items = Vec::new();
+    for (idx, exchange) in app.topology_exchanges.iter().enumerate() {
+        if exchange.name.is_empty() { continue; }
+        if use_filter && !app.filtered_exchange_indices.contains(&idx) {
+            continue;
+        }
+        items.push(TopologyFlatItem::Exchange(exchange.name.clone()));
+        if app.topology_expanded.contains(&exchange.name) {
+            for b in &app.topology_bindings {
+                if b.source == exchange.name {
+                    items.push(TopologyFlatItem::Binding(b.clone()));
+                }
+            }
+        }
+    }
+    items
+}
+
+pub fn topology_selected_exchange(app: &App, flat: &[TopologyFlatItem]) -> Option<String> {
+    match flat.get(app.topology_selected) {
+        Some(TopologyFlatItem::Exchange(name)) => Some(name.clone()),
+        Some(TopologyFlatItem::Binding(b)) => Some(b.source.clone()),
+        None => None,
     }
 }
 

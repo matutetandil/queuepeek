@@ -172,12 +172,23 @@ pub fn handle_queue_list_key(app: &mut App, code: KeyCode, modifiers: KeyModifie
             }
         }
         KeyCode::Char('X') => {
-            app.topology_exchanges.clear();
-            app.topology_bindings.clear();
-            app.topology_scroll = 0;
-            app.popup = Popup::TopologyView;
-            app.loading = true;
-            app.load_topology();
+            if let Some(ref backend) = app.backend {
+                if backend.backend_type() == "rabbitmq" {
+                    app.topology_exchanges.clear();
+                    app.topology_bindings.clear();
+                    app.topology_scroll = 0;
+                    app.topology_selected = 0;
+                    app.topology_expanded.clear();
+                    app.exchange_filter.clear();
+                    app.exchange_filter_active = false;
+                    app.exchange_filter_focused = false;
+                    app.screen = Screen::ExchangeList;
+                    app.loading = true;
+                    app.load_topology();
+                } else {
+                    app.set_status("Topology view is only available for RabbitMQ", true);
+                }
+            }
         }
         KeyCode::F(5)
             if app.selected_queue().is_some() => {

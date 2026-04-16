@@ -95,11 +95,13 @@ pub struct ExchangeInfo {
 
 /// Binding info for topology view
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct BindingInfo {
     pub source: String,
     pub destination: String,
     pub routing_key: String,
-    pub _destination_type: String,
+    pub destination_type: String,
+    pub properties_key: String,
 }
 
 /// Permission/ACL entry for a user or principal
@@ -208,6 +210,16 @@ pub trait Backend: Send {
     /// Clear a retained message by publishing empty payload with retain=true
     fn clear_retained_message(&self, _namespace: &str, _topic: &str) -> Result<(), String> {
         Err("Clear retained not supported by this backend".into())
+    }
+
+    /// Create a binding between an exchange and a queue
+    fn create_binding(&self, _namespace: &str, _exchange: &str, _queue: &str, _routing_key: &str) -> Result<(), String> {
+        Err("Not supported".into())
+    }
+
+    /// Delete a binding between an exchange and a queue
+    fn delete_binding(&self, _namespace: &str, _exchange: &str, _queue: &str, _properties_key: &str) -> Result<(), String> {
+        Err("Not supported".into())
     }
 
     /// Reset consumer group offsets for a queue/topic

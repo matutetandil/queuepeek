@@ -39,7 +39,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         Popup::TemplatePicker => draw_template_picker(frame, app),
         Popup::SaveTemplate => draw_save_template(frame, app),
         Popup::ReplayConfig => draw_replay_config(frame, app),
-        Popup::TopologyView => draw_topology(frame, app),
+        Popup::AddBinding { .. } => draw_add_binding(frame, app),
         Popup::BenchmarkConfig => draw_benchmark_config(frame, app),
         Popup::BenchmarkRunning => draw_benchmark_running(frame, app),
         Popup::RetainedMessages => draw_retained_messages(frame, app),
@@ -55,6 +55,10 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
                 if routing_key.is_empty() { "(empty)" } else { routing_key },
             );
             draw_confirm(frame, app, "DLQ Re-route", &msg);
+        }
+        Popup::ExchangeInfo(ref name) => {
+            let name = name.clone();
+            draw_exchange_info(frame, app, &name);
         }
         Popup::FilePicker(_) => draw_file_picker(frame, app),
         Popup::ConfirmUpdate => draw_confirm_update(frame, app),
@@ -91,6 +95,7 @@ fn draw_help(frame: &mut Frame, app: &App) {
         crate::app::Screen::QueueList => "Queue List",
         crate::app::Screen::MessageList => "Messages",
         crate::app::Screen::MessageDetail => "Message Detail",
+        crate::app::Screen::ExchangeList => "Exchanges",
     };
     let backend_label = match bt {
         "rabbitmq" => "RabbitMQ",
@@ -219,6 +224,20 @@ fn draw_help(frame: &mut Frame, app: &App) {
                 shortcuts.push(("esc", "Go back to messages"));
             }
             shortcuts.extend([
+                ("?", "Toggle help"),
+                ("q", "Quit"),
+            ]);
+        }
+        crate::app::Screen::ExchangeList => {
+            shortcuts.extend([
+                ("j/k ↑/↓", "Navigate exchanges"),
+                ("⏎", "Expand / collapse bindings"),
+                ("/", "Filter exchanges"),
+                ("b", "Add binding to exchange"),
+                ("d", "Delete selected binding"),
+                ("i", "Exchange info"),
+                ("r", "Reload topology"),
+                ("esc", "Go back to queues"),
                 ("?", "Toggle help"),
                 ("q", "Quit"),
             ]);
@@ -1547,43 +1566,47 @@ fn draw_replay_config(frame: &mut Frame, app: &App) {
     frame.render_widget(Paragraph::new(lines).style(Style::default().bg(app.theme.bg)), inner);
 }
 
-fn draw_topology(frame: &mut Frame, app: &App) {
-    let popup_area = centered_rect(70, 75, frame.area());
+fn draw_add_binding(frame: &mut Frame, app: &App) {
+    let popup_area = centered_rect(45, 30, frame.area());
     frame.render_widget(Clear, popup_area);
+
+    let exchange_name = if let Popup::AddBinding { ref exchange } = app.popup {
+        exchange.clone()
+    } else {
+        String::new()
+    };
+
     let block = Block::bordered()
-        .title(" Topology ")
+        .title(format!(" Add Binding to {} ", exchange_name))
         .title_style(Style::default().fg(app.theme.accent).bold())
         .border_style(Style::default().fg(app.theme.accent))
         .style(Style::default().bg(app.theme.bg));
     let inner = block.inner(popup_area);
     frame.render_widget(block, popup_area);
 
-    if app.topology_exchanges.is_empty() && app.loading {
-        frame.render_widget(Paragraph::new("  Loading...").style(Style::default().fg(app.theme.muted).bg(app.theme.bg)), inner);
-        return;
-    }
-    let ds = Style::default().fg(app.theme.muted);
     let ks = Style::default().fg(app.theme.accent).bold();
-    let mut lines: Vec<Line> = Vec::new();
-    for exchange in &app.topology_exchanges {
-        if exchange.name.is_empty() { continue; }
+    let ds = Style::default().fg(app.theme.muted);
+    let fields = [("Queue", &app.binding_form_queue), ("Routing Key", &app.binding_form_routing_key)];
+
+    let mut lines: Vec<Line> = vec![Line::from("")];
+    for (i, (label, value)) in fields.iter().enumerate() {
+        let focused = i == app.binding_form_focused;
+        let ls = if focused { ks } else { ds };
+        let vs = if focused { Style::default().fg(app.theme.white) } else { Style::default().fg(app.theme.primary) };
+        let cursor = if focused { "\u{2588}" } else { "" };
         lines.push(Line::from(vec![
-            Span::styled(format!("  {} ", exchange.name), ks),
-            Span::styled(format!("[{}]", exchange.exchange_type), ds),
-            if exchange.durable { Span::styled(" durable", Style::default().fg(app.theme.success)) } else { Span::styled(" transient", ds) },
+            Span::styled(format!("  {}: ", label), ls),
+            Span::styled(format!("{}{}", value, cursor), vs),
         ]));
-        let bindings: Vec<&crate::backend::BindingInfo> = app.topology_bindings.iter().filter(|b| b.source == exchange.name).collect();
-        for (i, b) in bindings.iter().enumerate() {
-            let pfx = if i == bindings.len() - 1 { "  └── " } else { "  ├── " };
-            let rk = if b.routing_key.is_empty() { "*".to_string() } else { b.routing_key.clone() };
-            lines.push(Line::from(vec![Span::styled(pfx, ds), Span::styled(rk, Style::default().fg(app.theme.primary)), Span::styled(format!(" → {}", b.destination), Style::default().fg(app.theme.white))]));
-        }
-        if bindings.is_empty() { lines.push(Line::from(Span::styled("  └── (no bindings)", ds))); }
-        lines.push(Line::from(""));
     }
-    if lines.is_empty() { lines.push(Line::from(Span::styled("  No exchanges found", ds))); }
-    lines.push(Line::from(vec![Span::styled("  j/k", ks), Span::styled(":scroll  ", ds), Span::styled("esc", ks), Span::styled(":close", ds)]));
-    frame.render_widget(Paragraph::new(lines).style(Style::default().bg(app.theme.bg)).scroll((app.topology_scroll, 0)), inner);
+    lines.push(Line::from(""));
+    lines.push(Line::from(vec![
+        Span::styled("  Tab", ks), Span::styled(":next  ", ds),
+        Span::styled("Enter", ks), Span::styled(":create  ", ds),
+        Span::styled("Esc", ks), Span::styled(":cancel", ds),
+    ]));
+
+    frame.render_widget(Paragraph::new(lines).style(Style::default().bg(app.theme.bg)), inner);
 }
 
 fn draw_benchmark_config(frame: &mut Frame, app: &App) {
@@ -2223,5 +2246,87 @@ fn draw_update_complete(frame: &mut Frame, app: &App, message: &str) {
     frame.render_widget(
         Paragraph::new(lines).block(block).style(Style::default().bg(app.theme.bg)),
         popup_area,
+    );
+}
+
+fn draw_exchange_info(frame: &mut Frame, app: &App, exchange_name: &str) {
+    let popup_area = centered_rect(60, 60, frame.area());
+    frame.render_widget(Clear, popup_area);
+
+    let block = Block::bordered()
+        .title(format!(" Exchange: {} ", exchange_name))
+        .title_style(Style::default().fg(app.theme.accent).bold())
+        .border_style(Style::default().fg(app.theme.accent))
+        .style(Style::default().bg(app.theme.bg));
+
+    let inner = block.inner(popup_area);
+    frame.render_widget(block, popup_area);
+
+    let chunks = Layout::vertical([
+        Constraint::Min(1),
+        Constraint::Length(1),
+    ]).split(inner);
+
+    let exchange = app.topology_exchanges.iter().find(|e| e.name == exchange_name);
+    let bindings: Vec<_> = app.topology_bindings.iter()
+        .filter(|b| b.source == exchange_name)
+        .collect();
+
+    let ks = Style::default().fg(app.theme.muted);
+    let vs = Style::default().fg(app.theme.primary);
+    let section_style = Style::default().fg(app.theme.accent).bold();
+
+    let mut lines: Vec<Line> = Vec::new();
+
+    lines.push(Line::from(vec![
+        Span::styled("  ── ", Style::default().fg(app.theme.divider)),
+        Span::styled(" General ", section_style),
+        Span::styled("─".repeat(20), Style::default().fg(app.theme.divider)),
+    ]));
+    if let Some(ex) = exchange {
+        lines.push(Line::from(vec![
+            Span::styled("  Type:      ", ks),
+            Span::styled(&ex.exchange_type, vs),
+        ]));
+        lines.push(Line::from(vec![
+            Span::styled("  Durable:   ", ks),
+            Span::styled(if ex.durable { "yes" } else { "no" },
+                if ex.durable { Style::default().fg(app.theme.success) } else { vs }),
+        ]));
+    }
+
+    lines.push(Line::from(""));
+    lines.push(Line::from(vec![
+        Span::styled("  ── ", Style::default().fg(app.theme.divider)),
+        Span::styled(format!(" Bindings ({}) ", bindings.len()), section_style),
+        Span::styled("─".repeat(15), Style::default().fg(app.theme.divider)),
+    ]));
+
+    if bindings.is_empty() {
+        lines.push(Line::from(Span::styled("  (no bindings)", ks)));
+    } else {
+        for b in &bindings {
+            let rk = if b.routing_key.is_empty() { "#" } else { &b.routing_key };
+            lines.push(Line::from(vec![
+                Span::styled(format!("  {:<20} ", rk), Style::default().fg(app.theme.primary)),
+                Span::styled("→ ", Style::default().fg(app.theme.muted)),
+                Span::styled(&b.destination, Style::default().fg(app.theme.white)),
+                Span::styled(format!("  [{}]", b.destination_type), Style::default().fg(app.theme.muted)),
+            ]));
+        }
+    }
+
+    frame.render_widget(
+        Paragraph::new(lines).style(Style::default().bg(app.theme.bg)),
+        chunks[0],
+    );
+
+    let footer = Line::from(vec![
+        Span::styled("  Esc", Style::default().fg(app.theme.accent).bold()),
+        Span::styled(":close", Style::default().fg(app.theme.muted)),
+    ]);
+    frame.render_widget(
+        Paragraph::new(footer).style(Style::default().bg(app.theme.bg)),
+        chunks[1],
     );
 }
