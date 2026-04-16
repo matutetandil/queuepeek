@@ -2085,8 +2085,13 @@ fn draw_file_picker(frame: &mut Frame, app: &App) {
     );
 }
 
+// All update popups use the same size to avoid visual artifacts when transitioning
+fn update_popup_area(frame: &Frame) -> Rect {
+    centered_rect(50, 30, frame.area())
+}
+
 fn draw_updating(frame: &mut Frame, app: &App) {
-    let popup_area = centered_rect(50, 20, frame.area());
+    let popup_area = update_popup_area(frame);
     frame.render_widget(Clear, popup_area);
 
     let block = Block::bordered()
@@ -2095,11 +2100,31 @@ fn draw_updating(frame: &mut Frame, app: &App) {
         .border_style(Style::default().fg(app.theme.accent))
         .style(Style::default().bg(app.theme.bg));
 
+    let spinner = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+    let frame_idx = (app.marquee_tick * 5 + (std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() / 200) as usize) % spinner.len();
+
+    let version = app.update_checker.latest_version.as_deref().unwrap_or("unknown");
+
     let lines = vec![
         Line::from(""),
-        Line::from(Span::styled("  Downloading and installing update...", Style::default().fg(app.theme.primary))),
+        Line::from(vec![
+            Span::styled("  Current: ", Style::default().fg(app.theme.muted)),
+            Span::styled(format!("v{}", env!("CARGO_PKG_VERSION")), Style::default().fg(app.theme.primary)),
+        ]),
+        Line::from(vec![
+            Span::styled("  Latest:  ", Style::default().fg(app.theme.muted)),
+            Span::styled(format!("v{}", version), Style::default().fg(app.theme.success).bold()),
+        ]),
         Line::from(""),
-        Line::from(Span::styled("  Please wait.", Style::default().fg(app.theme.muted))),
+        Line::from(vec![
+            Span::styled(format!("  {} ", spinner[frame_idx]), Style::default().fg(app.theme.accent).bold()),
+            Span::styled("Downloading and installing...", Style::default().fg(app.theme.primary)),
+        ]),
+        Line::from(""),
+        Line::from(Span::styled("  Please wait, do not close the app.", Style::default().fg(app.theme.muted))),
     ];
 
     frame.render_widget(
@@ -2109,7 +2134,7 @@ fn draw_updating(frame: &mut Frame, app: &App) {
 }
 
 fn draw_confirm_update(frame: &mut Frame, app: &App) {
-    let popup_area = centered_rect(50, 30, frame.area());
+    let popup_area = update_popup_area(frame);
     frame.render_widget(Clear, popup_area);
 
     let version = app.update_checker.latest_version.as_deref().unwrap_or("unknown");
@@ -2148,7 +2173,7 @@ fn draw_confirm_update(frame: &mut Frame, app: &App) {
 }
 
 fn draw_update_complete(frame: &mut Frame, app: &App, message: &str) {
-    let popup_area = centered_rect(50, 30, frame.area());
+    let popup_area = update_popup_area(frame);
     frame.render_widget(Clear, popup_area);
 
     let is_error = message.starts_with("Update failed");
@@ -2170,15 +2195,19 @@ fn draw_update_complete(frame: &mut Frame, app: &App, message: &str) {
         Line::from(""),
     ];
 
-    if !is_error {
-        lines.push(Line::from(Span::styled("  Restart the app to use the new version.", Style::default().fg(app.theme.muted))));
+    if is_error {
+        lines.push(Line::from(vec![
+            Span::styled("  Enter", Style::default().fg(app.theme.accent).bold()),
+            Span::styled(": close", Style::default().fg(app.theme.muted)),
+        ]));
+    } else {
+        lines.push(Line::from(Span::styled("  The app will close. Reopen to use the new version.", Style::default().fg(app.theme.muted))));
         lines.push(Line::from(""));
+        lines.push(Line::from(vec![
+            Span::styled("  Enter", Style::default().fg(app.theme.accent).bold()),
+            Span::styled(": quit", Style::default().fg(app.theme.muted)),
+        ]));
     }
-
-    lines.push(Line::from(vec![
-        Span::styled("  Enter", Style::default().fg(app.theme.accent).bold()),
-        Span::styled(": close", Style::default().fg(app.theme.muted)),
-    ]));
 
     frame.render_widget(
         Paragraph::new(lines).block(block).style(Style::default().bg(app.theme.bg)),

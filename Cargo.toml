@@ -1,6 +1,6 @@
 [package]
 name = "queuepeek"
-version = "0.8.5"
+version = "0.8.6"
 edition = "2021"
 description = "A TUI multi-broker message queue inspector for RabbitMQ, Kafka, and MQTT"
 license = "MIT"

@@ -785,10 +785,15 @@ pub fn handle_popup_key(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
         Popup::Updating => {
             // Block all input while updating
         }
-        Popup::UpdateComplete(_) => {
+        Popup::UpdateComplete(ref msg) => {
+            let is_error = msg.starts_with("Update failed");
             match code {
                 KeyCode::Enter | KeyCode::Esc | KeyCode::Char('q') => {
-                    app.popup = Popup::None;
+                    if is_error {
+                        app.popup = Popup::None;
+                    } else {
+                        app.should_quit = true;
+                    }
                 }
                 _ => {}
             }

@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.8.6] - 2026-04-16
+
+### Improved
+- Update popup flow with animated spinner and proper cleanup
+  - Spinner animation during download with version info visible
+  - All update popups use the same size to prevent visual artifacts
+  - Successful update closes the app on Enter for clean restart
+  - Failed update only closes the popup so the app remains usable
+- Parallelized crates.io publish with binary builds in release workflow
+
+---
+
 ## [0.8.5] - 2026-04-16
 
 ### Improved
