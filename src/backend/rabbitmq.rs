@@ -559,6 +559,25 @@ impl Backend for RabbitMqBackend {
             sections.push(DetailSection { title: "Configuration".into(), entries: config });
         }
 
+        // Bindings — which exchanges feed this queue
+        let bindings_path = format!("/api/queues/{}/{}/bindings", encoded_ns, encoded_q);
+        if let Ok(bindings_data) = self.get::<Vec<serde_json::Value>>(&bindings_path) {
+            let mut bindings = Vec::new();
+            for b in &bindings_data {
+                let source = b.get("source").and_then(|v| v.as_str()).unwrap_or("");
+                // Skip the default exchange self-binding (empty source)
+                if source.is_empty() {
+                    continue;
+                }
+                let routing_key = b.get("routing_key").and_then(|v| v.as_str()).unwrap_or("");
+                let rk_display = if routing_key.is_empty() { "(all)" } else { routing_key };
+                bindings.push(DetailEntry::kv(source, rk_display));
+            }
+            if !bindings.is_empty() {
+                sections.push(DetailSection { title: "Bindings".into(), entries: bindings });
+            }
+        }
+
         Ok(sections)
     }
 

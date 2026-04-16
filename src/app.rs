@@ -2278,7 +2278,7 @@ impl App {
                 }
                 BgResult::QueueDetail(Ok(detail)) => {
                     self.queue_detail = detail;
-                    self.queue_info_scroll = 0;
+                    // Don't reset scroll on refresh — preserve user position
                     self.loading = false;
                 }
                 BgResult::QueueDetail(Err(e)) => {

@@ -274,9 +274,17 @@ pub fn handle_popup_key(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
             }
         }
         Popup::QueueInfo => {
-            handle_scrollable_popup(app, code, |a| &mut a.queue_info_scroll, &[
-                KeyCode::Char('q'), KeyCode::Char('i'),
-            ]);
+            if code == KeyCode::Esc || code == KeyCode::Char('q') || code == KeyCode::Char('i') {
+                app.popup = Popup::None;
+                return;
+            }
+            // Calculate content line count for scroll clamping
+            let total_lines: u16 = app.queue_detail.iter().enumerate().map(|(i, s)| {
+                let sep = if i > 0 { 1 } else { 0 }; // blank line between sections
+                (sep + 1 + s.entries.len()) as u16      // header + entries
+            }).sum();
+            let max_scroll = total_lines.saturating_sub(5); // keep a few lines visible
+            handle_scroll_keys(code, &mut app.queue_info_scroll, Some(max_scroll));
         }
         Popup::OperationProgress => {
             if code == KeyCode::Esc {
@@ -289,7 +297,7 @@ pub fn handle_popup_key(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
                     app.popup = Popup::None;
                     app.diff_messages = None;
                 }
-                _ => handle_scroll_keys(code, &mut app.diff_scroll),
+                _ => handle_scroll_keys(code, &mut app.diff_scroll, None),
             }
         }
         Popup::CompareResults => {
@@ -314,7 +322,7 @@ pub fn handle_popup_key(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
                     };
                     app.comparison_scroll = 0;
                 }
-                _ => handle_scroll_keys(code, &mut app.comparison_scroll),
+                _ => handle_scroll_keys(code, &mut app.comparison_scroll, None),
             }
         }
         Popup::ScheduleDelay => {
@@ -465,7 +473,7 @@ pub fn handle_popup_key(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
                 KeyCode::Esc | KeyCode::Char('X') => {
                     app.popup = Popup::None;
                 }
-                _ => handle_scroll_keys(code, &mut app.topology_scroll),
+                _ => handle_scroll_keys(code, &mut app.topology_scroll, None),
             }
         }
         Popup::BenchmarkConfig => {
@@ -612,7 +620,7 @@ pub fn handle_popup_key(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
         Popup::AlertLog => {
             match code {
                 KeyCode::Esc => app.popup = Popup::AlertConfig,
-                _ => handle_scroll_keys(code, &mut app.alert_log_scroll),
+                _ => handle_scroll_keys(code, &mut app.alert_log_scroll, None),
             }
         }
         Popup::Permissions => {
@@ -621,7 +629,7 @@ pub fn handle_popup_key(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
                     app.popup = Popup::None;
                     app.permissions.clear();
                 }
-                _ => handle_scroll_keys(code, &mut app.permissions_scroll),
+                _ => handle_scroll_keys(code, &mut app.permissions_scroll, None),
             }
         }
         Popup::RetainedMessages => {
@@ -806,7 +814,7 @@ pub fn handle_popup_key(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
 // Shared helpers to reduce duplication
 // ---------------------------------------------------------------------------
 
-fn handle_scroll_keys(code: KeyCode, scroll: &mut u16) {
+fn handle_scroll_keys(code: KeyCode, scroll: &mut u16, max_scroll: Option<u16>) {
     match code {
         KeyCode::Char('j') | KeyCode::Down => {
             *scroll = scroll.saturating_add(1);
@@ -822,19 +830,11 @@ fn handle_scroll_keys(code: KeyCode, scroll: &mut u16) {
         }
         _ => {}
     }
-}
-
-fn handle_scrollable_popup(
-    app: &mut App,
-    code: KeyCode,
-    scroll_field: fn(&mut App) -> &mut u16,
-    extra_close_keys: &[KeyCode],
-) {
-    if code == KeyCode::Esc || extra_close_keys.contains(&code) {
-        app.popup = Popup::None;
-        return;
+    if let Some(max) = max_scroll {
+        if *scroll > max {
+            *scroll = max;
+        }
     }
-    handle_scroll_keys(code, scroll_field(app));
 }
 
 /// Unified publish/edit popup handler (deduplicated)

@@ -664,12 +664,32 @@ fn draw_queue_info(frame: &mut Frame, app: &App) {
     let inner = block.inner(popup_area);
     frame.render_widget(block, popup_area);
 
+    // Split inner into scrollable content and fixed footer
+    let chunks = Layout::vertical([
+        Constraint::Min(1),
+        Constraint::Length(1),
+    ]).split(inner);
+    let content_area = chunks[0];
+    let footer_area = chunks[1];
+
+    // Draw fixed footer
+    let footer_line = Line::from(vec![
+        Span::styled("  j/k", Style::default().fg(app.theme.accent).bold()),
+        Span::styled(":scroll  ", Style::default().fg(app.theme.muted)),
+        Span::styled("esc", Style::default().fg(app.theme.accent).bold()),
+        Span::styled(":close", Style::default().fg(app.theme.muted)),
+    ]);
+    frame.render_widget(
+        Paragraph::new(footer_line).style(Style::default().bg(app.theme.bg)),
+        footer_area,
+    );
+
     if app.queue_detail.is_empty() {
         let loading = Paragraph::new(Line::from(Span::styled(
             "  Loading...",
             Style::default().fg(app.theme.muted),
         ))).style(Style::default().bg(app.theme.bg));
-        frame.render_widget(loading, inner);
+        frame.render_widget(loading, content_area);
         return;
     }
 
@@ -724,21 +744,12 @@ fn draw_queue_info(frame: &mut Frame, app: &App) {
         }
     }
 
-    // Footer
-    lines.push(Line::from(""));
-    lines.push(Line::from(vec![
-        Span::styled("  j/k", Style::default().fg(app.theme.accent).bold()),
-        Span::styled(":scroll  ", Style::default().fg(app.theme.muted)),
-        Span::styled("esc", Style::default().fg(app.theme.accent).bold()),
-        Span::styled(":close", Style::default().fg(app.theme.muted)),
-    ]));
-
     // Apply scroll
     let scroll = app.queue_info_scroll;
     let content = Paragraph::new(lines)
         .style(Style::default().bg(app.theme.bg))
         .scroll((scroll, 0));
-    frame.render_widget(content, inner);
+    frame.render_widget(content, content_area);
 }
 
 fn draw_consumer_groups(frame: &mut Frame, app: &App) {
