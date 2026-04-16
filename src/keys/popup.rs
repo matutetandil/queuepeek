@@ -349,12 +349,11 @@ pub fn handle_popup_key(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
                 KeyCode::Esc => {
                     app.popup = Popup::None;
                 }
-                KeyCode::Char('j') | KeyCode::Down => {
-                    if count > 0 {
+                KeyCode::Char('j') | KeyCode::Down
+                    if count > 0 => {
                         let i = app.scheduled_list_state.selected().unwrap_or(0);
                         if i + 1 < count { app.scheduled_list_state.select(Some(i + 1)); }
                     }
-                }
                 KeyCode::Char('k') | KeyCode::Up => {
                     let i = app.scheduled_list_state.selected().unwrap_or(0);
                     if i > 0 { app.scheduled_list_state.select(Some(i - 1)); }
@@ -384,8 +383,8 @@ pub fn handle_popup_key(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
                 KeyCode::Esc => app.popup = Popup::None,
                 KeyCode::Char(c) => app.save_filter_name.push(c),
                 KeyCode::Backspace => { app.save_filter_name.pop(); }
-                KeyCode::Enter => {
-                    if !app.save_filter_name.is_empty() {
+                KeyCode::Enter
+                    if !app.save_filter_name.is_empty() => {
                         let queue = app.current_queue_name.clone();
                         let filter = crate::config::SavedFilter {
                             name: app.save_filter_name.clone(),
@@ -397,7 +396,6 @@ pub fn handle_popup_key(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
                         app.popup = Popup::None;
                         app.set_status(format!("Filter saved: {}", app.save_filter_name), false);
                     }
-                }
                 _ => {}
             }
         }
@@ -409,8 +407,8 @@ pub fn handle_popup_key(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
                 KeyCode::Esc => app.popup = Popup::PublishMessage,
                 KeyCode::Char(c) => app.save_template_name.push(c),
                 KeyCode::Backspace => { app.save_template_name.pop(); }
-                KeyCode::Enter => {
-                    if !app.save_template_name.is_empty() {
+                KeyCode::Enter
+                    if !app.save_template_name.is_empty() => {
                         let tmpl = crate::config::MessageTemplate {
                             name: app.save_template_name.clone(),
                             routing_key: app.publish_form.routing_key.clone(),
@@ -422,7 +420,6 @@ pub fn handle_popup_key(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
                         app.popup = Popup::PublishMessage;
                         app.set_status(format!("Template saved: {}", app.save_template_name), false);
                     }
-                }
                 _ => {}
             }
         }
@@ -512,12 +509,11 @@ pub fn handle_popup_key(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
             let count = app.config.webhook_alerts.len();
             match code {
                 KeyCode::Esc => app.popup = Popup::None,
-                KeyCode::Char('j') | KeyCode::Down => {
-                    if count > 0 {
+                KeyCode::Char('j') | KeyCode::Down
+                    if count > 0 => {
                         let i = app.alert_list_state.selected().unwrap_or(0);
                         if i + 1 < count { app.alert_list_state.select(Some(i + 1)); }
                     }
-                }
                 KeyCode::Char('k') | KeyCode::Up => {
                     let i = app.alert_list_state.selected().unwrap_or(0);
                     if i > 0 { app.alert_list_state.select(Some(i - 1)); }
@@ -635,12 +631,11 @@ pub fn handle_popup_key(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
                     app.popup = Popup::None;
                     app.retained_messages.clear();
                 }
-                KeyCode::Char('j') | KeyCode::Down => {
-                    if count > 0 {
+                KeyCode::Char('j') | KeyCode::Down
+                    if count > 0 => {
                         let i = app.retained_list_state.selected().unwrap_or(0);
                         if i + 1 < count { app.retained_list_state.select(Some(i + 1)); }
                     }
-                }
                 KeyCode::Char('k') | KeyCode::Up => {
                     let i = app.retained_list_state.selected().unwrap_or(0);
                     if i > 0 { app.retained_list_state.select(Some(i - 1)); }
@@ -883,12 +878,11 @@ fn handle_publish_key(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
                 app.publish_form.error = "No templates saved yet".into();
             }
         }
-        KeyCode::Char('w') if modifiers.contains(KeyModifiers::CONTROL) => {
-            if !app.publish_form.body.is_empty() {
+        KeyCode::Char('w') if modifiers.contains(KeyModifiers::CONTROL)
+            && !app.publish_form.body.is_empty() => {
                 app.save_template_name.clear();
                 app.popup = Popup::SaveTemplate;
             }
-        }
         KeyCode::Char(c) => {
             app.publish_form.push_char(c);
         }
@@ -1003,34 +997,30 @@ fn handle_queue_picker_key(app: &mut App, code: KeyCode) {
 fn handle_consumer_groups_key(app: &mut App, code: KeyCode) {
     let group_count = app.consumer_groups.len();
     match code {
-        KeyCode::Char('j') | KeyCode::Down => {
-            if group_count > 0 {
+        KeyCode::Char('j') | KeyCode::Down
+            if group_count > 0 => {
                 let sel = app.consumer_groups_selected.unwrap_or(0);
                 if sel + 1 < group_count {
                     app.consumer_groups_selected = Some(sel + 1);
                 }
             }
-        }
-        KeyCode::Char('k') | KeyCode::Up => {
-            if group_count > 0 {
+        KeyCode::Char('k') | KeyCode::Up
+            if group_count > 0 => {
                 let sel = app.consumer_groups_selected.unwrap_or(0);
                 if sel > 0 {
                     app.consumer_groups_selected = Some(sel - 1);
                 }
             }
-        }
-        KeyCode::PageDown => {
-            if group_count > 0 {
+        KeyCode::PageDown
+            if group_count > 0 => {
                 let sel = app.consumer_groups_selected.unwrap_or(0);
                 app.consumer_groups_selected = Some((sel + 5).min(group_count - 1));
             }
-        }
-        KeyCode::PageUp => {
-            if group_count > 0 {
+        KeyCode::PageUp
+            if group_count > 0 => {
                 let sel = app.consumer_groups_selected.unwrap_or(0);
                 app.consumer_groups_selected = Some(sel.saturating_sub(5));
             }
-        }
         KeyCode::Char('R') => {
             if let Some(ref backend) = app.backend {
                 if backend.backend_type() != "kafka" {

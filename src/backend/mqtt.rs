@@ -90,12 +90,11 @@ impl Backend for MqttBackend {
                     connected = true;
                     let _ = client.subscribe("$SYS/broker/version", QoS::AtMostOnce);
                 }
-                Ok(Event::Incoming(Packet::Publish(msg))) => {
-                    if msg.topic == "$SYS/broker/version" {
+                Ok(Event::Incoming(Packet::Publish(msg)))
+                    if msg.topic == "$SYS/broker/version" => {
                         broker_version = String::from_utf8_lossy(&msg.payload).to_string();
                         break;
                     }
-                }
                 Err(e) => {
                     if !connected {
                         return Err(format!("MQTT connection failed: {}", e));

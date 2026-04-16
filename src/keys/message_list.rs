@@ -56,12 +56,11 @@ pub fn handle_message_list_key(app: &mut App, code: KeyCode, modifiers: KeyModif
             app.message_filter_active = true;
             app.message_filter_focused = true;
         }
-        KeyCode::Char('r') | KeyCode::Char('R') => {
-            if !app.current_queue_name.is_empty() {
+        KeyCode::Char('r') | KeyCode::Char('R')
+            if !app.current_queue_name.is_empty() => {
                 app.loading = true;
                 app.load_messages();
             }
-        }
         KeyCode::Char('f') => {
             app.popup = Popup::FetchCount;
             let idx = app::FETCH_PRESETS.iter().position(|&c| c == app.fetch_count).unwrap_or(2);
@@ -92,22 +91,20 @@ pub fn handle_message_list_key(app: &mut App, code: KeyCode, modifiers: KeyModif
         KeyCode::Char('a') => {
             app.select_all_messages();
         }
-        KeyCode::Char('C') => {
-            if app.selection_count() > 0 {
+        KeyCode::Char('C')
+            if app.selection_count() > 0 => {
                 app.queue_picker_filter.clear();
                 app.queue_picker_filter_active = false;
                 app.popup = Popup::MessageQueuePicker(app::QueueOperation::Copy);
                 app.popup_list_state.select(Some(0));
             }
-        }
-        KeyCode::Char('M') => {
-            if app.selection_count() > 0 {
+        KeyCode::Char('M')
+            if app.selection_count() > 0 => {
                 app.queue_picker_filter.clear();
                 app.queue_picker_filter_active = false;
                 app.popup = Popup::MessageQueuePicker(app::QueueOperation::Move);
                 app.popup_list_state.select(Some(0));
             }
-        }
         KeyCode::Char('d') => {
             if app.selected_messages.len() == 2 {
                 let indices: Vec<usize> = app.selected_messages.iter().cloned().collect();
@@ -120,21 +117,18 @@ pub fn handle_message_list_key(app: &mut App, code: KeyCode, modifiers: KeyModif
                 app.set_status("Select exactly 2 messages to diff", true);
             }
         }
-        KeyCode::Char('D') => {
-            if app.selection_count() > 0 {
+        KeyCode::Char('D')
+            if app.selection_count() > 0 => {
                 app.popup = Popup::ConfirmDeleteMessages;
             }
-        }
-        KeyCode::Char('e') => {
-            if app.selection_count() > 0 {
+        KeyCode::Char('e')
+            if app.selection_count() > 0 => {
                 app.open_file_picker(crate::app::FilePickerMode::Export { pretty: false });
             }
-        }
-        KeyCode::Char('E') => {
-            if app.selection_count() > 0 {
+        KeyCode::Char('E')
+            if app.selection_count() > 0 => {
                 app.open_file_picker(crate::app::FilePickerMode::Export { pretty: true });
             }
-        }
         KeyCode::Char('W') => {
             app.do_dump_queue();
         }

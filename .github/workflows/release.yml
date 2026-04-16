@@ -12,8 +12,31 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  check:
+    name: Check & Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y cmake libssl-dev libcurl4-openssl-dev pkg-config
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Check
+        run: cargo check
+
+      - name: Test
+        run: cargo test
+
+      - name: Clippy
+        run: cargo clippy -- -D warnings
+
   build:
     name: Build ${{ matrix.target }}
+    needs: check
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false

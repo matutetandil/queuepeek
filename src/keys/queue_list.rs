@@ -63,13 +63,12 @@ pub fn handle_queue_list_key(app: &mut App, code: KeyCode, modifiers: KeyModifie
             app.loading = true;
             app.load_queues();
         }
-        KeyCode::Char('v') => {
-            if !app.namespaces.is_empty() {
+        KeyCode::Char('v')
+            if !app.namespaces.is_empty() => {
                 app.popup = Popup::NamespacePicker;
                 let idx = app.namespaces.iter().position(|v| v == &app.selected_namespace).unwrap_or(0);
                 app.popup_list_state.select(Some(idx));
             }
-        }
         KeyCode::Char('p') => {
             app.popup = Popup::ProfileSwitch;
             app.popup_list_state.select(Some(0));
@@ -120,32 +119,28 @@ pub fn handle_queue_list_key(app: &mut App, code: KeyCode, modifiers: KeyModifie
                 app.popup = Popup::PublishMessage;
             }
         }
-        KeyCode::Char('x') => {
-            if app.selected_queue().is_some() {
+        KeyCode::Char('x')
+            if app.selected_queue().is_some() => {
                 app.popup = Popup::ConfirmPurge;
             }
-        }
-        KeyCode::Char('D') => {
-            if app.selected_queue().is_some() {
+        KeyCode::Char('D')
+            if app.selected_queue().is_some() => {
                 app.popup = Popup::ConfirmDelete;
             }
-        }
-        KeyCode::Char('C') => {
-            if app.selected_queue().is_some() {
+        KeyCode::Char('C')
+            if app.selected_queue().is_some() => {
                 app.queue_picker_filter.clear();
                 app.queue_picker_filter_active = false;
                 app.popup = Popup::QueuePicker(app::QueueOperation::Copy);
                 app.popup_list_state.select(Some(0));
             }
-        }
-        KeyCode::Char('m') => {
-            if app.selected_queue().is_some() {
+        KeyCode::Char('m')
+            if app.selected_queue().is_some() => {
                 app.queue_picker_filter.clear();
                 app.queue_picker_filter_active = false;
                 app.popup = Popup::QueuePicker(app::QueueOperation::Move);
                 app.popup_list_state.select(Some(0));
             }
-        }
         KeyCode::Char('G') => {
             if let Some(q) = app.selected_queue() {
                 let name = q.name.clone();
@@ -184,12 +179,11 @@ pub fn handle_queue_list_key(app: &mut App, code: KeyCode, modifiers: KeyModifie
             app.loading = true;
             app.load_topology();
         }
-        KeyCode::F(5) => {
-            if app.selected_queue().is_some() {
+        KeyCode::F(5)
+            if app.selected_queue().is_some() => {
                 app.bench_focused_field = 0;
                 app.popup = Popup::BenchmarkConfig;
             }
-        }
         KeyCode::Char('W') => {
             // Webhook alert config
             if !app.config.webhook_alerts.is_empty() {
