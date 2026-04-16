@@ -2361,12 +2361,21 @@ impl App {
             })
             .map(|(i, _)| i)
             .collect();
+        let filtered = self.filtered_queue_indices.len();
+        let total = self.queues.len();
+        if filtered == total {
+            self.set_status(format!("{} queues loaded", total), false);
+        } else {
+            self.set_status(format!("{} of {} queues match", filtered, total), false);
+        }
     }
 
     pub fn update_filtered_messages(&mut self) {
         let filter = self.message_filter.to_lowercase();
         if filter.is_empty() {
             self.filtered_message_indices = (0..self.messages.len()).collect();
+            let total = self.messages.len();
+            self.set_status(format!("{} messages loaded", total), false);
             return;
         }
 
@@ -2385,6 +2394,9 @@ impl App {
                 .map(|(i, _)| i)
                 .collect();
         }
+        let filtered = self.filtered_message_indices.len();
+        let total = self.messages.len();
+        self.set_status(format!("{} of {} messages match", filtered, total), false);
     }
 
     pub fn selected_queue(&self) -> Option<&QueueInfo> {

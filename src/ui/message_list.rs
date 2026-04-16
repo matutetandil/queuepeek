@@ -45,7 +45,11 @@ fn draw_header(frame: &mut Frame, app: &App, area: Rect) -> u16 {
             Style::default().fg(app.theme.white).bold().bg(app.theme.sidebar_bg),
         ),
         Span::styled(
-            format!("({} msgs, fetch: {})", app.messages.len(), app.fetch_count),
+            if app.filtered_message_indices.len() == app.messages.len() {
+                format!("({} msgs, fetch: {})", app.messages.len(), app.fetch_count)
+            } else {
+                format!("({} of {} msgs, fetch: {})", app.filtered_message_indices.len(), app.messages.len(), app.fetch_count)
+            },
             muted,
         ),
         if !app.selected_messages.is_empty() {

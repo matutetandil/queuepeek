@@ -47,7 +47,14 @@ fn draw_header(frame: &mut Frame, app: &App, area: Rect) -> u16 {
             format!("{} ", app.selected_namespace),
             Style::default().fg(app.theme.white).bold().bg(app.theme.sidebar_bg),
         ),
-        Span::styled(format!("({} queues){}", count, loading), muted),
+        Span::styled(
+            if count == app.queues.len() {
+                format!("({} queues){}", count, loading)
+            } else {
+                format!("({} of {} queues){}", count, app.queues.len(), loading)
+            },
+            muted,
+        ),
     ];
     let content_width: u16 = spans.iter().map(|s| s.content.len() as u16).sum();
     let line = Line::from(spans);

@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.8.4] - 2026-04-16
+
+### Improved
+- Live filter feedback in header and status bar
+  - Queue list header shows "X of Y queues" while filtering
+  - Message list header shows "X of Y msgs" while filtering
+  - Status bar (green line) updates in real time: "12 of 153 queues match"
+  - Restores to "153 queues loaded" when filter is cleared
+
+---
+
 ## [0.8.3] - 2026-04-16
 
 ### Added
