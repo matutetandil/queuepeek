@@ -12,8 +12,10 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         area,
     );
 
+    let has_activity_bar = app.message_auto_refresh;
     let chunks = Layout::vertical([
         Constraint::Length(1), // header
+        if has_activity_bar { Constraint::Length(1) } else { Constraint::Length(0) },
         Constraint::Min(3),    // message list
         Constraint::Length(2), // footer
     ])
@@ -21,8 +23,11 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
 
     let hw = draw_header(frame, app, chunks[0]);
     super::draw_version_tag(frame, app, chunks[0], hw);
-    draw_list(frame, app, chunks[1]);
-    draw_footer(frame, app, chunks[2]);
+    if has_activity_bar {
+        draw_activity_bar(frame, app, chunks[1]);
+    }
+    draw_list(frame, app, chunks[2]);
+    draw_footer(frame, app, chunks[3]);
 
     if app.popup != Popup::None {
         super::popup::draw(frame, app);
@@ -35,7 +40,7 @@ fn draw_header(frame: &mut Frame, app: &App, area: Rect) -> u16 {
     let sep = Span::styled(" › ", Style::default().fg(app.theme.divider).bg(app.theme.sidebar_bg));
     let muted = Style::default().fg(app.theme.muted).bg(app.theme.sidebar_bg);
 
-    let spans = vec![
+    let mut spans = vec![
         Span::styled(format!("  {} ", app.profile_name), muted),
         sep.clone(),
         Span::styled(format!("{} ", app.selected_namespace), muted),
@@ -60,15 +65,14 @@ fn draw_header(frame: &mut Frame, app: &App, area: Rect) -> u16 {
         } else {
             Span::raw("")
         },
-        if app.message_auto_refresh {
-            Span::styled(
-                "  [live ⟳]",
-                Style::default().fg(app.theme.accent).bold().bg(app.theme.sidebar_bg),
-            )
-        } else {
-            Span::raw("")
-        },
     ];
+    if app.message_auto_refresh {
+        spans.push(Span::styled(
+            "  live",
+            Style::default().fg(app.theme.success).bold().bg(app.theme.sidebar_bg),
+        ));
+        spans.push(super::live_pulse_span(app));
+    }
     let content_width: u16 = spans.iter().map(|s| s.content.len() as u16).sum();
     let line = Line::from(spans);
 
@@ -77,6 +81,47 @@ fn draw_header(frame: &mut Frame, app: &App, area: Rect) -> u16 {
         area,
     );
     content_width
+}
+
+fn draw_activity_bar(frame: &mut Frame, app: &App, area: Rect) {
+    let queue = &app.current_queue_name;
+
+    // Get current queue stats
+    let (msgs, pub_rate, del_rate, consumers) = app.queues.iter()
+        .find(|q| q.name == *queue)
+        .map(|q| (q.messages, q.publish_rate, q.deliver_rate, q.consumers))
+        .unwrap_or((0, 0.0, 0.0, 0));
+
+    // Sparkline
+    let sparkline_width = 16;
+    let sparkline_str = app.rate_history.get(queue)
+        .map(|h| h.sparkline_str(sparkline_width))
+        .unwrap_or_else(|| " ".repeat(sparkline_width));
+    let has_activity = !sparkline_str.trim().is_empty();
+
+    let ks = Style::default().fg(app.theme.accent).bg(app.theme.highlight_bg);
+    let ds = Style::default().fg(app.theme.muted).bg(app.theme.highlight_bg);
+    let vs = Style::default().fg(app.theme.primary).bg(app.theme.highlight_bg);
+
+    let spans = vec![
+        Span::styled("  msgs:", ds),
+        Span::styled(format!("{} ", msgs), vs),
+        Span::styled("↑", ks),
+        Span::styled(format!("{:.0}/s ", pub_rate), vs),
+        Span::styled("↓", ks),
+        Span::styled(format!("{:.0}/s ", del_rate), vs),
+        Span::styled("consumers:", ds),
+        Span::styled(format!("{} ", consumers), vs),
+        Span::styled(
+            sparkline_str,
+            Style::default().fg(if has_activity { app.theme.accent } else { app.theme.muted }).bg(app.theme.highlight_bg),
+        ),
+    ];
+
+    frame.render_widget(
+        Paragraph::new(Line::from(spans)).style(Style::default().bg(app.theme.highlight_bg)),
+        area,
+    );
 }
 
 // ─── Message List ─────────────────────────────────────────────────────────

@@ -40,7 +40,7 @@ fn draw_header(frame: &mut Frame, app: &App, area: Rect) -> u16 {
     let sep = Span::styled(" › ", Style::default().fg(app.theme.divider).bg(app.theme.sidebar_bg));
     let muted = Style::default().fg(app.theme.muted).bg(app.theme.sidebar_bg);
 
-    let spans = vec![
+    let mut spans = vec![
         Span::styled(format!("  {} ", app.profile_name), muted),
         sep,
         Span::styled(
@@ -56,6 +56,10 @@ fn draw_header(frame: &mut Frame, app: &App, area: Rect) -> u16 {
             muted,
         ),
     ];
+    // Queue list always auto-refreshes — show live pulse
+    if !app.queues.is_empty() {
+        spans.push(super::live_pulse_span(app));
+    }
     let content_width: u16 = spans.iter().map(|s| s.content.len() as u16).sum();
     let line = Line::from(spans);
 

@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.9.0] - 2026-04-16
+
+### Added
+- Live pulse indicator in header bar
+  - Queue list: pulsing green dot shows auto-refresh is active
+  - Message list: `live ●` appears when tail mode is on (`T`)
+- Activity bar in message list during tail mode
+  - Shows message count, publish/deliver rates, consumer count, and sparkline
+  - Appears between header and message list only when tail mode is active
+  - Refreshes queue stats alongside messages every 5 seconds
+
+---
+
 ## [0.8.6] - 2026-04-16
 
 ### Improved

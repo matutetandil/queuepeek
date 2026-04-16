@@ -39,6 +39,18 @@ pub fn draw_version_tag(frame: &mut Frame, app: &App, area: Rect, header_content
     }
 }
 
+/// Returns a pulsing green dot span to indicate live/auto-refresh is active.
+/// Alternates between bright and dim every ~500ms.
+pub fn live_pulse_span(app: &App) -> Span<'static> {
+    let ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+    let bright = (ms / 500).is_multiple_of(2);
+    let color = if bright { app.theme.success } else { app.theme.muted };
+    Span::styled(" ●", Style::default().fg(color).bg(app.theme.sidebar_bg))
+}
+
 pub fn draw(frame: &mut Frame, app: &mut App) {
     match app.screen {
         Screen::ProfileSelect => profiles::draw(frame, app),
