@@ -20,6 +20,7 @@ src/
 │   ├── queue_list.rs    # Queue list handlers
 │   ├── message_list.rs  # Message list handlers
 │   ├── message_detail.rs
+│   ├── exchange_list.rs # Exchange list screen key handlers
 │   └── popup.rs         # All popup handlers (unified queue pickers, publish/edit)
 ├── backend/
 │   ├── mod.rs           # Backend trait (~20 methods) and shared data structs
@@ -32,6 +33,7 @@ src/
     ├── queue_list.rs     # Queue list with sparklines
     ├── message_list.rs   # Message list with multi-select checkboxes
     ├── message_detail.rs # Payload display with syntax highlighting and decode
+    ├── exchange_list.rs  # Exchange list screen UI rendering
     ├── popup.rs          # ~38 popup draw functions
     └── theme.rs          # 5 themes with picker and live preview
 ```
@@ -39,10 +41,10 @@ src/
 ## Key design patterns
 
 ### State machine
-`App` holds all application state. The `Screen` enum (`ProfileSelect`, `QueueList`, `MessageList`, `MessageDetail`) drives which UI module renders. The `Popup` enum (~38 variants) overlays modal popups on any screen.
+`App` holds all application state. The `Screen` enum (`ProfileSelect`, `QueueList`, `MessageList`, `MessageDetail`, `ExchangeList`) drives which UI module renders. The `Popup` enum (~38 variants) overlays modal popups on any screen.
 
 ### Backend trait
-The `Backend` trait abstracts all broker-specific logic. Required methods: `broker_info`, `list_namespaces`, `list_queues`, `peek_messages`, `clone_backend`. Optional methods (default to "not supported"): `publish_message`, `delete_queue`, `purge_queue`, `consume_messages`, `consumer_groups`, `list_permissions`, `list_retained_messages`, etc.
+The `Backend` trait abstracts all broker-specific logic. Required methods: `broker_info`, `list_namespaces`, `list_queues`, `peek_messages`, `clone_backend`. Optional methods (default to "not supported"): `publish_message`, `delete_queue`, `purge_queue`, `consume_messages`, `consumer_groups`, `list_permissions`, `list_retained_messages`, `create_exchange`, `delete_exchange`, `create_binding`, `delete_binding`, etc.
 
 ### Background I/O
 All broker communication runs in spawned threads. Results are sent back via `std::sync::mpsc` channels as `BgResult` enum variants. The event loop in `run_app` polls both `crossterm` input events and the mpsc receiver on each 100ms tick.

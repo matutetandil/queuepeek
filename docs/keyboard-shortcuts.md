@@ -34,7 +34,7 @@ Global: `Ctrl+C` quits from any screen. `Shift+U` triggers auto-update when avai
 | `=` | Compare with another queue (diff) |
 | `i` | Queue info popup (stats, config, rates) |
 | `Shift+G` | Consumer groups (Kafka) |
-| `Shift+X` | Topology view (RabbitMQ) |
+| `Shift+X` | Exchange management screen (RabbitMQ) |
 | `F5` | Benchmark / load test |
 | `Shift+S` | View scheduled messages |
 | `Shift+H` | Retained messages (MQTT only) |
@@ -63,7 +63,8 @@ Global: `Ctrl+C` quits from any screen. `Shift+U` triggers auto-update when avai
 | `Shift+M` | Move selected to another queue |
 | `Shift+D` | Delete selected (with confirmation) |
 | `d` | Diff two selected messages side-by-side |
-| `e` | Export selected to JSON file |
+| `e` | Export selected to JSON |
+| `Shift+E` | Export selected (pretty JSON) |
 | `Shift+R` | Re-publish selected to same queue |
 | `Shift+W` | Dump entire queue to JSONL |
 | `Shift+I` | Import from JSONL/JSON file |
@@ -85,6 +86,9 @@ Global: `Ctrl+C` quits from any screen. `Shift+U` triggers auto-update when avai
 | `s` | Toggle Schema Registry decode |
 | `c` | Copy payload to clipboard |
 | `h` | Copy headers to clipboard |
+| `/` | Search in payload |
+| `n` | Next search match |
+| `Shift+N` | Previous search match |
 | `Shift+E` | Edit & re-publish |
 | `Shift+L` | DLQ re-route |
 | `Esc` | Back to message list |
@@ -128,3 +132,30 @@ Global: `Ctrl+C` quits from any screen. `Shift+U` triggers auto-update when avai
 | `j` / `k` | Navigate |
 | `Shift+D` | Clear retained message |
 | `c` | Copy body to clipboard |
+
+## Exchange list
+
+| Key | Action |
+|-----|--------|
+| `j` / `k` / `↑` / `↓` | Navigate exchanges and bindings |
+| `Enter` | Expand/collapse exchange bindings |
+| `/` | Filter exchanges |
+| `a` | Create new exchange |
+| `Shift+D` | Delete exchange |
+| `b` | Create binding for selected exchange |
+| `d` | Delete selected binding |
+| `i` | Exchange info popup |
+| `?` | Help |
+| `Esc` | Clear filter / go back to queues |
+
+## File browser
+
+| Key | Action |
+|-----|--------|
+| `j` / `k` | Navigate directories |
+| `Enter` | Open directory / select file |
+| `Backspace` | Go up one directory |
+| `Tab` | Edit filename |
+| `Ctrl+H` | Toggle hidden files |
+| `Enter` (in filename) | Save/import |
+| `Esc` | Cancel |

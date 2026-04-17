@@ -15,8 +15,12 @@ Browse queues, read messages, publish, diff, dump, replay, and manage your broke
 - **Message operations** — publish, copy, move, delete, export, import, diff, replay
 - **Multi-select** — bulk operations on selected messages with visual checkboxes
 - **Smart decode** — JSON/XML pretty-print, base64/gzip auto-decode, Avro via Schema Registry, Protobuf raw decode
+- **Exchange management** — browse, create, delete exchanges and bindings (RabbitMQ)
 - **Queue management** — purge, delete, compare queues, topology view, consumer groups
+- **Payload search** — vim-style `/` search with `n`/`N` navigation and highlighted matches
 - **Monitoring** — sparklines, auto-refresh, tail mode, webhook alerts with regex matching
+- **Pretty export** — `Shift+E` exports JSON with fully indented nested bodies
+- **File browser** — directory navigation popup for export and import operations
 - **Benchmarking** — concurrent flood-publish with p50/p95/p99 latency percentiles
 - **DLQ workflows** — x-death header parsing, one-click re-route to original exchange
 - **5 color themes** — with live preview picker
@@ -73,24 +77,27 @@ See the [full configuration guide](docs/configuration.md) for TLS, MQTT topics, 
 
 ## Keyboard shortcuts
 
-| Key | Queue list | Message list | Detail |
-|-----|-----------|-------------|--------|
-| `j/k` | Navigate | Navigate | Scroll |
-| `Enter` | Open queue | Open message | — |
-| `/` | Filter | Filter | Search payload |
-| `Shift+P` | Publish | Publish | — |
-| `p` | — | — | Pretty-print |
-| `b` | — | — | Base64/gzip decode |
-| `s` | — | — | Schema Registry decode |
-| `e`/`E` | — | Export / pretty | — |
-| `Space` | — | Toggle select | — |
-| `i` | Queue info | — | — |
-| `Shift+G` | Consumer groups | — | — |
-| `Shift+X` | Exchanges | — | — |
-| `F5` | Benchmark | — | — |
-| `n`/`N` | — | — | Next/prev match |
-| `?` | Help | Help | Help |
-| `Esc` | Back | Back/clear | Back |
+| Key | Queue list | Message list | Detail | Exchanges |
+|-----|-----------|-------------|--------|-----------|
+| `j/k` | Navigate | Navigate | Scroll | Navigate |
+| `Enter` | Open queue | Open message | — | Expand/collapse |
+| `/` | Filter | Filter | Search payload | Filter |
+| `Shift+P` | Publish | Publish | — | — |
+| `p` | — | — | Pretty-print | — |
+| `b` | — | — | Base64/gzip decode | Create binding |
+| `s` | — | — | Schema Registry decode | — |
+| `e`/`Shift+E` | — | Export / pretty | — | — |
+| `Space` | — | Toggle select | — | — |
+| `i` | Queue info | — | — | Exchange info |
+| `Shift+G` | Consumer groups | — | — | — |
+| `Shift+X` | Exchange mgmt | — | — | — |
+| `a` | — | — | — | Create exchange |
+| `Shift+D` | Delete queue | Delete selected | — | Delete exchange |
+| `d` | — | Diff two msgs | — | Delete binding |
+| `F5` | Benchmark | — | — | — |
+| `n`/`Shift+N` | — | — | Next/prev match | — |
+| `?` | Help | Help | Help | Help |
+| `Esc` | Back | Back/clear | Back | Back to queues |
 
 See the [full keyboard reference](docs/keyboard-shortcuts.md) for all shortcuts.
 

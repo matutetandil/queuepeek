@@ -13,9 +13,13 @@ rabbitmq-plugins enable rabbitmq_management
 - Publish uses the default exchange with queue name as routing key
 - Publish to exchange supported for DLQ re-routing
 - Purge and delete via Management API
+- Exchange management: create, delete, and list exchanges via `/api/exchanges`
+- Binding management: create and delete bindings via `/api/bindings`
 - Topology view queries `/api/exchanges` and `/api/bindings`
+- Queue bindings visible in queue info popup
 - Permissions query `/api/permissions/{vhost}`
 - Queue detail includes message stats, rates, memory, consumers, policy, and arguments
+- Consumer details (IP, channel, prefetch) available in queue info
 
 ## Kafka
 
@@ -63,6 +67,7 @@ Connects via the **MQTT protocol** using `rumqttc`.
 | Consumer groups | No | Yes | No |
 | Offset reset | No | Yes | No |
 | Message replay | No | Yes | No |
+| Exchange management | Yes | No | No |
 | Topology view | Yes | No | No |
 | Permissions/ACL | Yes | Yes** | No |
 | Retained messages | No | No | Yes |

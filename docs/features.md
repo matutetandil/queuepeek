@@ -16,7 +16,7 @@ Press `Shift+P` on queue list or message list. Multi-line body editor with routi
 `Shift+D` in message list deletes selected messages via a consume-all → filter → re-publish strategy. A temp file backup is created for recovery on failure.
 
 ### Export / Import
-`e` exports selected messages to a pretty JSON file. `Shift+W` dumps the entire queue to a JSONL file (streaming, low memory). `Shift+I` imports from JSONL or JSON array files.
+`e` exports selected messages to a JSON file. `Shift+E` exports with fully indented JSON — nested JSON bodies are parsed and pretty-printed instead of escaped strings. `Shift+W` dumps the entire queue to a JSONL file (streaming, low memory). `Shift+I` imports from JSONL or JSON array files.
 
 ### Diff
 Select exactly 2 messages with `Space`, press `d`. Side-by-side colored diff using LCS algorithm. Headers compared field-by-field, bodies compared line-by-line.
@@ -49,7 +49,7 @@ Wire format: magic byte `0x00` + 4-byte schema ID (big-endian) + payload. Schema
 `=` picks a second queue and computes a diff — shows messages in both, only in A, only in B. Tabbed popup with summary.
 
 ### Topology (RabbitMQ)
-`Shift+X` shows a tree view of exchanges -> bindings -> queues with routing keys.
+`Shift+X` opens the exchange management screen with a tree view of exchanges -> bindings -> queues with routing keys.
 
 ## Kafka-specific
 
@@ -92,6 +92,42 @@ Queue list shows inline unicode sparklines for publish rate history (last 60 dat
 ## ACL / Permissions
 
 `Shift+A` shows a scrollable, color-coded permission table. RabbitMQ queries the Management API; Kafka shows broker security configs.
+
+## Exchange management
+
+Full screen for browsing, creating, and deleting exchanges (RabbitMQ). Access with `Shift+X` from the queue list.
+
+- Filter exchanges with `/`, expand/collapse bindings with `Enter`
+- Create exchange with `a`: name, type (direct/fanout/topic/headers), durable toggle
+- Delete exchange with `Shift+D` (requires confirmation)
+- Create bindings with `b` (queue + routing key), delete bindings with `d`
+- Exchange info popup with `i` showing type, durability, and binding list
+- Auto-refresh every 5 seconds with live pulse indicator
+- Queue info (`i`) now shows a bindings section
+
+## Payload search
+
+Vim-style `/` search in message detail view.
+
+- Case-insensitive matching with highlighted results
+- `n` / `Shift+N` to navigate between matches
+- Adapts to current display mode (pretty-print, decode, schema)
+
+## File browser
+
+Directory navigation popup for export and import operations.
+
+- Export mode: directory-only view for choosing save location
+- Import mode: files and directories for choosing what to import
+- Toggle hidden files with `Ctrl+H`
+- Pre-populated filenames with timestamps
+
+## Live indicators
+
+- Pulsing green dot in queue list header (always active)
+- "live ●" in message list header when tail mode is on
+- Activity bar during tail mode: message count, publish/deliver rates, consumer count, sparkline
+- Consumer details in queue info: IP, port, tag, channel, prefetch, ack mode
 
 ## Themes
 
