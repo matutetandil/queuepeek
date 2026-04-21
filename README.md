@@ -2,7 +2,7 @@
 
 A terminal UI for inspecting and managing message queues across RabbitMQ, Kafka, and MQTT.
 
-![Rust](https://img.shields.io/badge/rust-1.70%2B-orange) ![License](https://img.shields.io/badge/license-MIT-blue)
+![Rust](https://img.shields.io/badge/rust-1.70%2B-orange) ![License](https://img.shields.io/badge/license-MIT-blue) [![Buy Me A Coffee](https://img.shields.io/badge/buy%20me%20a%20coffee-donate-yellow)](https://buymeacoffee.com/matutetandil)
 
 ## What it does
 
@@ -112,6 +112,10 @@ See the [full keyboard reference](docs/keyboard-shortcuts.md) for all shortcuts.
 ## Tech stack
 
 [ratatui](https://github.com/ratatui-org/ratatui) | [crossterm](https://github.com/crossterm-rs/crossterm) | [rdkafka](https://github.com/fede1024/rust-rdkafka) | [rumqttc](https://github.com/bytebeamio/rumqtt) | [reqwest](https://github.com/seanmonstar/reqwest) | [apache-avro](https://github.com/apache/avro)
+
+## Support
+
+If queuepeek saves you time, you can [buy me a coffee](https://buymeacoffee.com/matutetandil) ☕
 
 ## License
 
