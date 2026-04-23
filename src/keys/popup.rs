@@ -146,11 +146,15 @@ pub fn handle_popup_key(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
                         let name = q.name.clone();
                         app.popup = Popup::None;
                         app.do_purge(&name);
+                    } else {
+                        app.popup = Popup::None;
+                        app.set_status("No queue selected", true);
                     }
                 }
-                _ => {
+                KeyCode::Esc | KeyCode::Char('n') | KeyCode::Char('N') => {
                     app.popup = Popup::None;
                 }
+                _ => {}
             }
         }
         Popup::ConfirmDelete => {
@@ -160,11 +164,15 @@ pub fn handle_popup_key(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
                         let name = q.name.clone();
                         app.popup = Popup::None;
                         app.do_delete(&name);
+                    } else {
+                        app.popup = Popup::None;
+                        app.set_status("No queue selected", true);
                     }
                 }
-                _ => {
+                KeyCode::Esc | KeyCode::Char('n') | KeyCode::Char('N') => {
                     app.popup = Popup::None;
                 }
+                _ => {}
             }
         }
         // Unified handler for all three queue picker variants
@@ -177,9 +185,10 @@ pub fn handle_popup_key(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
                     app.popup = Popup::None;
                     app.do_delete_selected();
                 }
-                _ => {
+                KeyCode::Esc | KeyCode::Char('n') | KeyCode::Char('N') => {
                     app.popup = Popup::None;
                 }
+                _ => {}
             }
         }
         Popup::ConsumerGroups => {
@@ -255,9 +264,10 @@ pub fn handle_popup_key(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
                     app.do_reset_offsets();
                     app.set_status("Resetting offsets...", false);
                 }
-                _ => {
+                KeyCode::Esc | KeyCode::Char('n') | KeyCode::Char('N') => {
                     app.popup = Popup::ConsumerGroups;
                 }
+                _ => {}
             }
         }
         Popup::ConfirmReroute { .. } => {
@@ -268,9 +278,10 @@ pub fn handle_popup_key(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
                         app.do_reroute_messages(&exchange, &routing_key);
                     }
                 }
-                _ => {
+                KeyCode::Esc | KeyCode::Char('n') | KeyCode::Char('N') => {
                     app.popup = Popup::None;
                 }
+                _ => {}
             }
         }
         Popup::QueueInfo => {

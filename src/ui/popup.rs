@@ -539,9 +539,6 @@ fn draw_publish(frame: &mut Frame, app: &mut App, title: &str) {
 }
 
 fn draw_confirm(frame: &mut Frame, app: &App, title: &str, message: &str) {
-    let popup_area = centered_rect(40, 20, frame.area());
-    frame.render_widget(Clear, popup_area);
-
     let queue_name = app.selected_queue().map(|q| q.name.as_str()).unwrap_or("?");
     let full_msg = format!("{}\n\nQueue: {}", message, queue_name);
 
@@ -562,13 +559,40 @@ fn draw_confirm(frame: &mut Frame, app: &App, title: &str, message: &str) {
     lines.push(Line::from(vec![
         Span::styled("  ", ds),
         Span::styled("y", ks), Span::styled(":confirm  ", ds),
+        Span::styled("n", ks), Span::styled("/", ds),
         Span::styled("esc", ks), Span::styled(":cancel", ds),
     ]));
+
+    // Size popup to fit content: borders + content lines, with sensible bounds
+    let area = frame.area();
+    let needed_height = (lines.len() as u16).saturating_add(2).min(area.height);
+    let needed_width = lines.iter()
+        .map(|l| l.width() as u16)
+        .max()
+        .unwrap_or(40)
+        .saturating_add(4)
+        .max(40)
+        .min(area.width);
+    let popup_area = fixed_centered_rect(needed_width, needed_height, area);
+    frame.render_widget(Clear, popup_area);
 
     frame.render_widget(
         Paragraph::new(lines).block(block).style(Style::default().bg(app.theme.bg)),
         popup_area,
     );
+}
+
+fn fixed_centered_rect(width: u16, height: u16, area: Rect) -> Rect {
+    let v = Layout::vertical([
+        Constraint::Length(area.height.saturating_sub(height) / 2),
+        Constraint::Length(height),
+        Constraint::Min(0),
+    ]).split(area);
+    Layout::horizontal([
+        Constraint::Length(area.width.saturating_sub(width) / 2),
+        Constraint::Length(width),
+        Constraint::Min(0),
+    ]).split(v[1])[1]
 }
 
 fn draw_queue_picker(frame: &mut Frame, app: &mut App) {

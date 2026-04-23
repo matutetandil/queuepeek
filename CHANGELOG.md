@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.10.1] - 2026-04-23
+
+### Fixed
+- Confirmation popups (purge, delete queue, delete messages, reset offsets, DLQ reroute) no longer close silently when pressing unexpected keys
+  - Only `y`/`Y` confirms and `esc`/`n`/`N` cancels; other keys leave the popup open
+  - Previously, pressing Enter or any other key closed the popup without executing the action
+- Confirmation popup size now adapts to its content
+  - The hint line (`y:confirm  n/esc:cancel`) was getting clipped on shorter terminals
+  - Popup width and height now fit the message plus the hint with proper padding
+- Message list now refreshes immediately after destructive operations
+  - Deleting selected messages or rerouting from the message list used to only refresh the queue stats and leave the message list stale until the next 5 s tick
+  - Queue list refresh after purge/delete/copy/move was already immediate and is unchanged
+
+---
+
 ## [0.10.0] - 2026-04-16
 
 ### Added

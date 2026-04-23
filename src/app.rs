@@ -2223,6 +2223,9 @@ impl App {
                     self.set_status(msg, false);
                     self.loading = true;
                     self.load_queues();
+                    if self.screen == Screen::MessageList && !self.current_queue_name.is_empty() {
+                        self.load_messages();
+                    }
                 }
                 BgResult::OperationComplete(Err(e)) => {
                     self.popup = Popup::None;
