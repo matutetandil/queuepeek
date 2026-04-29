@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.10.2] - 2026-04-29
+
+### Fixed
+- File picker import (`Shift+I` on message list) no longer closes the progress popup before the import runs
+  - The Enter handler unconditionally cleared the popup right after kicking off the background import, hiding the `OperationProgress` view that the import had just opened
+  - Export keeps clearing the popup; import lets the background result clear it on completion
+- Importing a "pretty" export (`Shift+E`) now publishes the actual body instead of an empty string
+  - Pretty exports store the body as a parsed JSON value (object/array/number) when possible
+  - Import was reading `body` with `as_str()`, which returned `None` for non-string values and silently published empty payloads
+  - Body is now serialized back to JSON when not a string; headers handle non-string values the same way
+- Single Enter on a file in import mode now triggers the import directly
+  - Previously the user had to press Enter twice (first to copy the filename into the input, then to confirm)
+  - Export still lets you edit the filename before confirming
+
+---
+
 ## [0.10.1] - 2026-04-23
 
 ### Fixed

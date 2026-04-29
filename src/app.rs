@@ -1359,15 +1359,25 @@ impl App {
                         return;
                     }
 
-                    let body = msg["body"].as_str().unwrap_or("");
+                    let body_owned: String = match &msg["body"] {
+                        serde_json::Value::String(s) => s.clone(),
+                        serde_json::Value::Null => String::new(),
+                        other => serde_json::to_string(other).unwrap_or_default(),
+                    };
                     let routing_key = msg["routing_key"].as_str().unwrap_or("");
                     let content_type = msg["content_type"].as_str().unwrap_or("");
                     let headers: Vec<(String, String)> = msg["headers"].as_object()
-                        .map(|h| h.iter().map(|(k, v)| (k.clone(), v.as_str().unwrap_or("").to_string())).collect())
+                        .map(|h| h.iter().map(|(k, v)| {
+                            let val = match v {
+                                serde_json::Value::String(s) => s.clone(),
+                                other => other.to_string(),
+                            };
+                            (k.clone(), val)
+                        }).collect())
                         .unwrap_or_default();
 
                     if let Err(e) = backend.publish_message(
-                        &namespace, &queue, body, routing_key, &headers, content_type,
+                        &namespace, &queue, &body_owned, routing_key, &headers, content_type,
                     ) {
                         let _ = tx.send(BgResult::OperationComplete(
                             Err(format!("Import failed at message {}/{}: {}", i + 1, total, e))

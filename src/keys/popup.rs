@@ -842,13 +842,13 @@ pub fn handle_popup_key(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
                                     Ok(msg) => app.set_status(msg, false),
                                     Err(e) => app.set_status(e, true),
                                 }
+                                app.popup = Popup::None;
                             }
                             app::FilePickerMode::Import => {
                                 app.import_file_path = path.to_string_lossy().to_string();
                                 app.do_import_jsonl();
                             }
                         }
-                        app.popup = Popup::None;
                     }
                     KeyCode::Char(c) => {
                         app.file_picker_filename.push(c);
@@ -886,8 +886,18 @@ pub fn handle_popup_key(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
                                 app.file_picker_dir = new_dir;
                                 app.refresh_file_picker();
                             } else if app.file_picker_show_files {
-                                app.file_picker_filename = entry.name.clone();
-                                app.file_picker_filename_focused = true;
+                                let entry_name = entry.name.clone();
+                                match mode {
+                                    app::FilePickerMode::Import => {
+                                        let path = app.file_picker_dir.join(&entry_name);
+                                        app.import_file_path = path.to_string_lossy().to_string();
+                                        app.do_import_jsonl();
+                                    }
+                                    app::FilePickerMode::Export { .. } => {
+                                        app.file_picker_filename = entry_name;
+                                        app.file_picker_filename_focused = true;
+                                    }
+                                }
                             }
                         }
                     }
