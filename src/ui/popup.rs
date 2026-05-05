@@ -10,6 +10,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         Popup::ProfileSwitch => draw_profile_switch(frame, app),
         Popup::NamespacePicker => draw_namespace_picker(frame, app),
         Popup::FetchCount => draw_fetch_count(frame, app),
+        Popup::FetchOnce => draw_fetch_once(frame, app),
         Popup::ThemePicker => draw_theme_picker(frame, app),
         Popup::BackendTypePicker => draw_backend_type_picker(frame, app),
         Popup::PublishMessage => draw_publish(frame, app, " Publish Message "),
@@ -132,8 +133,9 @@ fn draw_help(frame: &mut Frame, app: &App) {
                 ("r", "Reload queues"),
                 ("v", "Switch vhost/namespace"),
                 ("p", "Switch profile"),
-                ("f", "Fetch count preset"),
-                ("+/-", "Adjust fetch count"),
+                ("f", "Fetch count preset (persistent)"),
+                ("+/-", "Adjust fetch count (persistent)"),
+                ("F", "Load N messages (one-shot)"),
                 ("P", "Publish message"),
                 ("C", "Copy queue"),
                 ("m", "Move queue"),
@@ -157,7 +159,7 @@ fn draw_help(frame: &mut Frame, app: &App) {
             shortcuts.extend([
                 ("esc", "Go back to profiles"),
                 ("?", "Toggle help"),
-                ("q", "Quit"),
+                ("Ctrl+Q", "Quit"),
             ]);
         }
         crate::app::Screen::MessageList => {
@@ -192,11 +194,12 @@ fn draw_help(frame: &mut Frame, app: &App) {
                 shortcuts.push(("S", "View scheduled messages"));
             }
             shortcuts.extend([
-                ("f", "Fetch count preset"),
-                ("+/-", "Adjust fetch count"),
+                ("f", "Fetch count preset (persistent)"),
+                ("+/-", "Adjust fetch count (persistent)"),
+                ("F", "Load N messages (one-shot)"),
                 ("esc", "Go back to queues"),
                 ("?", "Toggle help"),
-                ("q", "Quit"),
+                ("Ctrl+Q", "Quit"),
             ]);
         }
         crate::app::Screen::MessageDetail => {
@@ -230,7 +233,7 @@ fn draw_help(frame: &mut Frame, app: &App) {
             }
             shortcuts.extend([
                 ("?", "Toggle help"),
-                ("q", "Quit"),
+                ("Ctrl+Q", "Quit"),
             ]);
         }
         crate::app::Screen::ExchangeList => {
@@ -244,7 +247,7 @@ fn draw_help(frame: &mut Frame, app: &App) {
                 ("r", "Reload topology"),
                 ("esc", "Go back to queues"),
                 ("?", "Toggle help"),
-                ("q", "Quit"),
+                ("Ctrl+Q", "Quit"),
             ]);
         }
         crate::app::Screen::ProfileSelect => {
@@ -256,7 +259,7 @@ fn draw_help(frame: &mut Frame, app: &App) {
                 ("d", "Delete selected profile"),
                 ("t", "Change theme"),
                 ("?", "Toggle help"),
-                ("q", "Quit"),
+                ("Ctrl+Q", "Quit"),
             ]);
         }
     }
@@ -365,6 +368,44 @@ fn draw_fetch_count(frame: &mut Frame, app: &mut App) {
         .highlight_symbol("▸ ");
 
     frame.render_stateful_widget(list, popup_area, &mut app.popup_list_state);
+}
+
+fn draw_fetch_once(frame: &mut Frame, app: &mut App) {
+    let popup_area = fixed_centered_rect(46, 7, frame.area());
+    frame.render_widget(Clear, popup_area);
+
+    let block = Block::bordered()
+        .title(" Load N messages (one-shot) ")
+        .title_style(Style::default().fg(app.theme.accent).bold())
+        .border_style(Style::default().fg(app.theme.accent))
+        .style(Style::default().bg(app.theme.bg));
+
+    let inner = block.inner(popup_area);
+    frame.render_widget(block, popup_area);
+
+    let lines = vec![
+        Line::from(vec![
+            Span::styled("Count: ", Style::default().fg(app.theme.muted)),
+            Span::styled(
+                if app.fetch_once_input.is_empty() { "_".to_string() } else { format!("{}_", app.fetch_once_input) },
+                Style::default().fg(app.theme.white).bold(),
+            ),
+        ]),
+        Line::from(""),
+        Line::from(Span::styled(
+            format!("Default fetch count stays at {}.", app.fetch_count),
+            Style::default().fg(app.theme.muted),
+        )),
+        Line::from(Span::styled(
+            "enter:load  esc:cancel",
+            Style::default().fg(app.theme.muted),
+        )),
+    ];
+
+    let para = Paragraph::new(lines)
+        .style(Style::default().bg(app.theme.bg))
+        .wrap(Wrap { trim: false });
+    frame.render_widget(para, inner);
 }
 
 fn draw_theme_picker(frame: &mut Frame, app: &mut App) {

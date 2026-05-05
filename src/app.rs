@@ -71,6 +71,7 @@ pub enum Popup {
     ProfileSwitch,
     NamespacePicker,
     FetchCount,
+    FetchOnce,
     ThemePicker,
     BackendTypePicker,
     PublishMessage,
@@ -132,7 +133,7 @@ pub enum QueueOperation {
     Copy,
 }
 
-pub const FETCH_PRESETS: &[u32] = &[10, 25, 50, 100, 250, 500];
+pub const FETCH_PRESETS: &[u32] = &[10, 25, 50, 100, 250, 500, 1000, 2000, 5000];
 pub const EXCHANGE_TYPES: &[&str] = &["direct", "fanout", "topic", "headers"];
 
 pub const SCHEDULE_PRESETS: &[(u64, &str)] = &[
@@ -291,6 +292,8 @@ pub struct App {
 
     // Shared
     pub fetch_count: u32,
+    pub fetch_once_input: String,
+    pub fetch_override: Option<u32>,
     pub status_message: String,
     pub status_is_error: bool,
     pub loading: bool,
@@ -706,6 +709,8 @@ impl App {
             diff_messages: None,
             diff_scroll: 0,
             fetch_count: 50,
+            fetch_once_input: String::new(),
+            fetch_override: None,
             status_message: String::new(),
             status_is_error: false,
             loading: false,
@@ -886,7 +891,7 @@ impl App {
         }
     }
 
-    pub fn load_messages(&self) {
+    pub fn load_messages(&mut self) {
         if let Some(ref backend) = self.backend {
             let queue_name = self.current_queue_name.clone();
             if queue_name.is_empty() {
@@ -894,7 +899,8 @@ impl App {
             }
             let backend = backend.clone_backend();
             let namespace = self.selected_namespace.clone();
-            let count = self.fetch_count;
+            // One-shot override consumes itself; subsequent loads use fetch_count
+            let count = self.fetch_override.take().unwrap_or(self.fetch_count);
             let tx = self.bg_sender.clone();
             std::thread::spawn(move || {
                 let result = backend.peek_messages(&namespace, &queue_name, count);

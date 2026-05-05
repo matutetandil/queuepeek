@@ -89,7 +89,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
                 Span::styled("d", ks), Span::styled(":del ", ds),
                 Span::styled("t", ks), Span::styled(":theme ", ds),
                 Span::styled("?", ks), Span::styled(":help ", ds),
-                Span::styled("q", ks), Span::styled(":quit", ds),
+                Span::styled("^Q", ks), Span::styled(":quit", ds),
             ])
         }
         ProfileMode::ConfirmDelete => Line::from(vec![

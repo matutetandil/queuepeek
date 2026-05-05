@@ -231,7 +231,8 @@ fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
         Span::styled("/", ks), Span::styled(":filter ", ds),
         Span::styled("i", ks), Span::styled(":info ", ds),
         Span::styled("?", ks), Span::styled(":help ", ds),
-        Span::styled("Esc", ks), Span::styled(":back", ds),
+        Span::styled("Esc", ks), Span::styled(":back ", ds),
+        Span::styled("^Q", ks), Span::styled(":quit", ds),
     ];
     let line1 = Line::from(shortcut_spans);
 

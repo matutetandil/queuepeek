@@ -20,7 +20,6 @@ pub fn handle_queue_list_key(app: &mut App, code: KeyCode, modifiers: KeyModifie
     }
 
     match code {
-        KeyCode::Char('q') => app.should_quit = true,
         KeyCode::Char('?') => {
             app.popup = if app.popup == Popup::Help { Popup::None } else { Popup::Help };
         }
@@ -95,8 +94,12 @@ pub fn handle_queue_list_key(app: &mut App, code: KeyCode, modifiers: KeyModifie
             let idx = app::FETCH_PRESETS.iter().position(|&c| c == app.fetch_count).unwrap_or(2);
             app.popup_list_state.select(Some(idx));
         }
+        KeyCode::Char('F') => {
+            app.fetch_once_input.clear();
+            app.popup = Popup::FetchOnce;
+        }
         KeyCode::Char('+') => {
-            if app.fetch_count < 500 { app.fetch_count += 10; }
+            if app.fetch_count < 5000 { app.fetch_count += 10; }
             app.set_status(format!("Fetch count: {}", app.fetch_count), false);
         }
         KeyCode::Char('-') => {

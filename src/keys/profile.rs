@@ -21,7 +21,6 @@ fn handle_profile_select_key(app: &mut App, code: KeyCode) {
     let total = names.len() + 2;
 
     match code {
-        KeyCode::Char('q') => app.should_quit = true,
         KeyCode::Char('?') => {
             app.popup = if app.popup == Popup::Help { Popup::None } else { Popup::Help };
         }

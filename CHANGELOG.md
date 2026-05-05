@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.10.3] - 2026-05-05
+
+### Changed
+- Quit shortcut moved from `q` to `Ctrl+Q` to avoid accidental exits
+  - `Ctrl+C` still quits as before
+  - The bare `q` key no longer does anything globally (also removed from `QueueInfo` and `UpdateComplete` popups for consistency)
+- Footers across all screens now show `^Q:quit` instead of `q:quit`
+
+### Added
+- One-shot fetch override: press `Shift+F` on the queue list or message list to load a specific number of messages just for that load
+  - Opens a popup with a numeric input (up to 7 digits)
+  - Does not change the persistent fetch count — the next refresh/tail tick goes back to the value set with `f` or `+`/`-`
+  - Useful when you need to grab the full contents of a queue with thousands of messages without permanently raising the default
+- Persistent fetch count (`f` preset picker and `+`/`-`) now goes up to 5000 (was 500)
+- Fetch presets list now includes 1000, 2000, 5000
+- Footers on queue list and message list now expose `f:fetch`, `F:loadN`, and `^Q:quit` so the shortcuts are discoverable
+- Help popup (`?`) lists `F` and clarifies that `f` and `+`/`-` are persistent
+
+### Note on RabbitMQ pagination
+The RabbitMQ Management API only returns messages from the head of a queue (`get` with `ack_requeue_true`). There is no offset-based pagination, so loading "the last N" messages of a deep queue means downloading all messages from the head and inspecting the tail. Kafka has real offsets and can already seek with replay (`Y`).
+
+---
+
 ## [0.10.2] - 2026-04-29
 
 ### Fixed

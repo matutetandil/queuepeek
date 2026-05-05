@@ -18,7 +18,6 @@ pub fn handle_exchange_list_key(app: &mut App, code: KeyCode, modifiers: KeyModi
     }
 
     match code {
-        KeyCode::Char('q') => app.should_quit = true,
         KeyCode::Char('?') => {
             app.popup = if app.popup == Popup::Help { Popup::None } else { Popup::Help };
         }

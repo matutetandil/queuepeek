@@ -1,6 +1,6 @@
 # Keyboard shortcuts
 
-Global: `Ctrl+C` quits from any screen. `Shift+U` triggers auto-update when available.
+Global: `Ctrl+Q` (or `Ctrl+C`) quits from any screen. `Shift+U` triggers auto-update when available. The bare `q` key does nothing — this is on purpose, to avoid accidental exits.
 
 ## Profile screen
 
@@ -12,7 +12,7 @@ Global: `Ctrl+C` quits from any screen. `Shift+U` triggers auto-update when avai
 | `e` | Edit selected profile |
 | `d` | Delete selected profile |
 | `t` | Open theme picker |
-| `q` | Quit |
+| `Ctrl+Q` | Quit |
 
 ## Queue list
 
@@ -22,8 +22,9 @@ Global: `Ctrl+C` quits from any screen. `Shift+U` triggers auto-update when avai
 | `Enter` | Open selected queue |
 | `/` | Filter queues by name |
 | `r` | Refresh queue list |
-| `f` | Fetch count picker |
-| `+` / `-` | Adjust fetch count by 10 |
+| `f` | Fetch count picker (persistent) |
+| `+` / `-` | Adjust fetch count by 10 (persistent, capped at 5000) |
+| `Shift+F` | Load N messages once (one-shot, does not change persistent fetch count) |
 | `v` | Switch namespace/vhost |
 | `p` | Switch profile |
 | `Shift+P` | Publish message |
@@ -42,7 +43,7 @@ Global: `Ctrl+C` quits from any screen. `Shift+U` triggers auto-update when avai
 | `Shift+W` | Webhook alert config |
 | `t` | Theme picker |
 | `Esc` | Back to profiles |
-| `q` | Quit |
+| `Ctrl+Q` | Quit |
 
 ## Message list
 
@@ -57,7 +58,9 @@ Global: `Ctrl+C` quits from any screen. `Shift+U` triggers auto-update when avai
 | `Space` | Toggle selection on current message |
 | `a` | Select/deselect all |
 | `r` | Refresh messages |
-| `f` | Fetch count picker |
+| `f` | Fetch count picker (persistent) |
+| `+` / `-` | Adjust fetch count by 10 (persistent, capped at 5000) |
+| `Shift+F` | Load N messages once (one-shot) |
 | `Shift+P` | Publish message |
 | `Shift+C` | Copy selected to another queue |
 | `Shift+M` | Move selected to another queue |
@@ -73,7 +76,7 @@ Global: `Ctrl+C` quits from any screen. `Shift+U` triggers auto-update when avai
 | `Shift+Y` | Replay from offset range (Kafka) |
 | `Shift+S` | View scheduled messages |
 | `Esc` | Clear selection / back to queue list |
-| `q` | Quit |
+| `Ctrl+Q` | Quit |
 
 ## Message detail
 
@@ -92,7 +95,7 @@ Global: `Ctrl+C` quits from any screen. `Shift+U` triggers auto-update when avai
 | `Shift+E` | Edit & re-publish |
 | `Shift+L` | DLQ re-route |
 | `Esc` | Back to message list |
-| `q` | Quit |
+| `Ctrl+Q` | Quit |
 
 ## Popup-specific shortcuts
 

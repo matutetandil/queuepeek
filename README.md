@@ -96,8 +96,11 @@ See the [full configuration guide](docs/configuration.md) for TLS, MQTT topics, 
 | `d` | — | Diff two msgs | — | Delete binding |
 | `F5` | Benchmark | — | — | — |
 | `n`/`Shift+N` | — | — | Next/prev match | — |
+| `f` | Fetch preset (persistent) | Fetch preset (persistent) | — | — |
+| `Shift+F` | Load N once | Load N once | — | — |
 | `?` | Help | Help | Help | Help |
 | `Esc` | Back | Back/clear | Back | Back to queues |
+| `Ctrl+Q` | Quit | Quit | Quit | Quit |
 
 See the [full keyboard reference](docs/keyboard-shortcuts.md) for all shortcuts.
 

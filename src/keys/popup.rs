@@ -135,6 +135,31 @@ pub fn handle_popup_key(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
                 _ => {}
             }
         }
+        Popup::FetchOnce => {
+            match code {
+                KeyCode::Esc => {
+                    app.fetch_once_input.clear();
+                    app.popup = Popup::None;
+                }
+                KeyCode::Backspace => { app.fetch_once_input.pop(); }
+                KeyCode::Char(c) if c.is_ascii_digit() && app.fetch_once_input.len() < 7 => {
+                    app.fetch_once_input.push(c);
+                }
+                KeyCode::Enter => {
+                    if let Ok(n) = app.fetch_once_input.parse::<u32>() {
+                        if n >= 1 {
+                            app.fetch_override = Some(n);
+                            app.fetch_once_input.clear();
+                            app.popup = Popup::None;
+                            app.loading = true;
+                            app.set_status(format!("Loading {} messages...", n), false);
+                            app.load_messages();
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
         // Unified handler for PublishMessage and EditMessage
         Popup::PublishMessage | Popup::EditMessage => {
             handle_publish_key(app, code, modifiers);
@@ -285,7 +310,7 @@ pub fn handle_popup_key(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
             }
         }
         Popup::QueueInfo => {
-            if code == KeyCode::Esc || code == KeyCode::Char('q') || code == KeyCode::Char('i') {
+            if code == KeyCode::Esc || code == KeyCode::Char('i') {
                 app.popup = Popup::None;
                 return;
             }
@@ -940,7 +965,7 @@ pub fn handle_popup_key(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
         Popup::UpdateComplete(ref msg) => {
             let is_error = msg.starts_with("Update failed");
             match code {
-                KeyCode::Enter | KeyCode::Esc | KeyCode::Char('q') => {
+                KeyCode::Enter | KeyCode::Esc => {
                     if is_error {
                         app.popup = Popup::None;
                     } else {

@@ -10,8 +10,10 @@ use crossterm::event::{KeyCode, KeyModifiers};
 use crate::app::{App, Popup, Screen};
 
 pub fn handle_key(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
-    // Ctrl+C always quits
-    if code == KeyCode::Char('c') && modifiers.contains(KeyModifiers::CONTROL) {
+    // Ctrl+C and Ctrl+Q always quit
+    if modifiers.contains(KeyModifiers::CONTROL)
+        && (code == KeyCode::Char('c') || code == KeyCode::Char('q'))
+    {
         app.should_quit = true;
         return;
     }
