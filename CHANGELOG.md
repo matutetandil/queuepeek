@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.10.4] - 2026-05-12
+
+### Fixed
+- Copy messages between RabbitMQ queues (`Shift+C` on the message list) now actually puts the messages in the chosen destination queue
+  - The RabbitMQ `publish_message` implementation uses the default exchange (`amq.default`), where the routing key must equal the destination queue name
+  - Previously the function forwarded the message's original routing key, which is the *source* queue name for messages published via the default exchange — so "copies" silently bounced back to the source queue (or were dropped as unrouted), and the success toast lied
+  - The function now always routes by the destination queue name and ignores the caller-supplied routing key (the publish form still works because it defaulted that field to the queue name anyway)
+- Move messages between RabbitMQ queues (`Shift+M` on the message list) now removes the originals from the source queue
+  - The handler called the copy routine for both Copy and Move, leaving the source untouched
+  - New `do_move_selected_to` consumes the source queue, publishes the targeted messages to the destination, and republishes the rest back to the source (same backup-and-restream strategy used by `Shift+D` delete)
+
+### Note on Move semantics
+RabbitMQ has no API to remove a specific message in place. Moving N out of M messages still requires draining the queue and republishing the M-N that stay — same cost as `Shift+D`. The backup file is removed only after the operation finishes successfully; on cancel or error the path is reported so nothing is lost.
+
+---
+
 ## [0.10.3] - 2026-05-05
 
 ### Changed

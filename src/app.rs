@@ -998,6 +998,159 @@ impl App {
         }
     }
 
+    /// Move the currently selected (or highlighted) messages from the source
+    /// queue to `dest`. Uses the same consume-everything-and-republish-the-rest
+    /// strategy as `do_delete_selected`, but instead of discarding the targeted
+    /// messages they are published to `dest`.
+    pub fn do_move_selected_to(&mut self, dest: &str) {
+        if let Some(ref backend) = self.backend {
+            let selected_indices: HashSet<usize> = if self.selected_messages.is_empty() {
+                if let Some(sel) = self.message_list_state.selected() {
+                    if let Some(&idx) = self.filtered_message_indices.get(sel) {
+                        let mut s = HashSet::new();
+                        s.insert(idx);
+                        s
+                    } else { return; }
+                } else { return; }
+            } else {
+                self.selected_messages.clone()
+            };
+
+            let backend = backend.clone_backend();
+            let namespace = self.selected_namespace.clone();
+            let source = self.current_queue_name.clone();
+            let dest = dest.to_string();
+            let tx = self.bg_sender.clone();
+            let cancel = self.operation_cancel.clone();
+            cancel.store(false, std::sync::atomic::Ordering::Relaxed);
+            self.operation_progress = (0, 0);
+            self.popup = Popup::OperationProgress;
+
+            std::thread::spawn(move || {
+                use std::io::{BufRead, Write};
+
+                let backup_path = std::env::temp_dir().join(format!("queuepeek-move-backup-{}.jsonl", chrono_timestamp()));
+                let backup_file = match std::fs::File::create(&backup_path) {
+                    Ok(f) => f,
+                    Err(e) => {
+                        let _ = tx.send(BgResult::OperationComplete(Err(format!("Creating backup: {}", e))));
+                        return;
+                    }
+                };
+                let mut writer = std::io::BufWriter::new(backup_file);
+
+                let _ = tx.send(BgResult::OperationProgress { completed: 0, total: 0 });
+                let batch_size = 100u32;
+                let mut total_consumed = 0usize;
+
+                loop {
+                    if cancel.load(std::sync::atomic::Ordering::Relaxed) {
+                        let _ = tx.send(BgResult::OperationComplete(
+                            Err(format!("Cancelled — backup at {}", backup_path.display()))
+                        ));
+                        return;
+                    }
+
+                    let batch = match backend.consume_messages(&namespace, &source, batch_size) {
+                        Ok(msgs) => msgs,
+                        Err(e) => {
+                            let _ = tx.send(BgResult::OperationComplete(
+                                Err(format!("Consume failed after {}: {} — backup at {}", total_consumed, e, backup_path.display()))
+                            ));
+                            return;
+                        }
+                    };
+
+                    if batch.is_empty() { break; }
+
+                    for msg in &batch {
+                        let json = message_to_json(msg);
+                        if let Err(e) = writeln!(writer, "{}", json) {
+                            let _ = tx.send(BgResult::OperationComplete(
+                                Err(format!("Writing backup: {}", e))
+                            ));
+                            return;
+                        }
+                    }
+
+                    total_consumed += batch.len();
+                    let _ = tx.send(BgResult::OperationProgress { completed: total_consumed, total: 0 });
+
+                    if (batch.len() as u32) < batch_size { break; }
+                }
+
+                drop(writer);
+
+                let file = match std::fs::File::open(&backup_path) {
+                    Ok(f) => f,
+                    Err(e) => {
+                        let _ = tx.send(BgResult::OperationComplete(
+                            Err(format!("Reading backup: {} — file at {}", e, backup_path.display()))
+                        ));
+                        return;
+                    }
+                };
+                let reader = std::io::BufReader::new(file);
+                let mut moved = 0usize;
+                let mut kept = 0usize;
+
+                for (i, line) in reader.lines().enumerate() {
+                    if cancel.load(std::sync::atomic::Ordering::Relaxed) {
+                        let _ = tx.send(BgResult::OperationComplete(
+                            Err(format!("Cancelled mid-move — backup at {}", backup_path.display()))
+                        ));
+                        return;
+                    }
+
+                    let line = match line {
+                        Ok(l) => l,
+                        Err(e) => {
+                            let _ = tx.send(BgResult::OperationComplete(
+                                Err(format!("Reading line {}: {} — backup at {}", i, e, backup_path.display()))
+                            ));
+                            return;
+                        }
+                    };
+
+                    let msg: serde_json::Value = match serde_json::from_str(&line) {
+                        Ok(v) => v,
+                        Err(_) => continue,
+                    };
+
+                    let body = msg["body"].as_str().unwrap_or("");
+                    let routing_key = msg["routing_key"].as_str().unwrap_or("");
+                    let content_type = msg["content_type"].as_str().unwrap_or("");
+                    let headers: Vec<(String, String)> = msg["headers"].as_object()
+                        .map(|h| h.iter().map(|(k, v)| (k.clone(), v.as_str().unwrap_or("").to_string())).collect())
+                        .unwrap_or_default();
+
+                    let target = if selected_indices.contains(&i) { &dest } else { &source };
+                    if let Err(e) = backend.publish_message(
+                        &namespace, target, body, routing_key, &headers, content_type,
+                    ) {
+                        let _ = tx.send(BgResult::OperationComplete(
+                            Err(format!("Publish to '{}' failed at msg {}: {} — backup at {}", target, i + 1, e, backup_path.display()))
+                        ));
+                        return;
+                    }
+
+                    if selected_indices.contains(&i) {
+                        moved += 1;
+                    } else {
+                        kept += 1;
+                    }
+                    let _ = tx.send(BgResult::OperationProgress { completed: moved + kept, total: total_consumed });
+                }
+
+                let _ = std::fs::remove_file(&backup_path);
+
+                let _ = tx.send(BgResult::OperationComplete(
+                    Ok(format!("Moved {} messages to {}, kept {} in {}", moved, dest, kept, source))
+                ));
+            });
+        }
+    }
+
     pub fn do_delete_selected(&mut self) {
         if let Some(ref backend) = self.backend {
             let selected_indices: HashSet<usize> = if self.selected_messages.is_empty() {

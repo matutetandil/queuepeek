@@ -262,14 +262,17 @@ impl Backend for RabbitMqBackend {
     fn publish_message(
         &self,
         namespace: &str,
-        _queue: &str,
+        queue: &str,
         body: &str,
-        routing_key: &str,
+        _routing_key: &str,
         headers: &[(String, String)],
         content_type: &str,
     ) -> Result<(), String> {
         let encoded_ns = urlencoding::encode(namespace);
-        // Publish via the default exchange (amq.default), routing_key = queue name
+        // Publish via the default exchange (amq.default). With this exchange the
+        // routing key must equal the destination queue name, so we always use
+        // `queue` here and intentionally ignore any caller-provided routing key
+        // (which would otherwise misroute the message back to its original queue).
         let path = format!("/api/exchanges/{}/amq.default/publish", encoded_ns);
 
         let props_headers = if headers.is_empty() {
@@ -287,7 +290,7 @@ impl Backend for RabbitMqBackend {
                 content_type: if content_type.is_empty() { None } else { Some(content_type.to_string()) },
                 headers: props_headers,
             },
-            routing_key: routing_key.to_string(),
+            routing_key: queue.to_string(),
             payload: body.to_string(),
             payload_encoding: "string".to_string(),
         };

@@ -1186,7 +1186,7 @@ fn handle_queue_picker_key(app: &mut App, code: KeyCode) {
                                 app.do_copy_selected_to(&dest_name);
                             }
                             QueueOperation::Move => {
-                                app.do_copy_selected_to(&dest_name);
+                                app.do_move_selected_to(&dest_name);
                             }
                         }
                     }
